@@ -1,0 +1,6 @@
+{
+  "name": "Nori",
+  "description": "Estudio de animación vectorial y motion design en el navegador con soporte para capas, fotogramas clave, curvas de suavizado, importación de Lottie y exportación en GIF, MP4, WebM y SVG.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
