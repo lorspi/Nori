@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.1] — 2026-09-30
+
+### Added
+
+- **Publicación en Cloudflare Pages con dominio propio**
+  Nori está disponible en [nori.lorspi.com](https://nori.lorspi.com), servido desde Cloudflare Pages con HTTPS y redirección automática de HTTP a HTTPS.
+
+- **Analítica opcional con Microsoft Clarity**
+  Clarity se carga solo cuando el ID del proyecto y el dominio permitido están definidos en un archivo `.env` local (`VITE_CLARITY_ID` y `VITE_CLARITY_HOST`) y la aplicación se abre desde ese dominio. Así, las copias del repositorio y el entorno de desarrollo no envían datos a las estadísticas del proyecto original. El archivo `.env.example` documenta las variables.
+
+### Changed
+
+- **Vista previa al compartir enlaces**
+  Las etiquetas Open Graph y Twitter Card usan URLs absolutas para la imagen de vista previa, y se añadieron `og:url` y la URL canónica, de modo que redes sociales y buscadores muestran correctamente el enlace a Nori.
+
 ## [0.1.0] — 2026-09-30
 
 ### Added

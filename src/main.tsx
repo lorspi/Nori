@@ -17,6 +17,21 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
+// Microsoft Clarity analytics. The ID and host come from a local, untracked
+// .env file, so clones of this repo never report to the original project.
+const clarityId = import.meta.env.VITE_CLARITY_ID;
+const clarityHost = import.meta.env.VITE_CLARITY_HOST;
+if (clarityId && clarityHost && location.hostname === clarityHost) {
+  const w = window as unknown as { clarity?: { (...args: unknown[]): void; q?: unknown[][] } };
+  w.clarity = w.clarity || function (...args: unknown[]) {
+    (w.clarity!.q = w.clarity!.q || []).push(args);
+  };
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = `https://www.clarity.ms/tag/${clarityId}`;
+  document.head.appendChild(script);
+}
+
 // Register service worker for PWA
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
