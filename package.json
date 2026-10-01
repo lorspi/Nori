@@ -8,6 +8,7 @@
     "dev": "vite --port=8080 --host=0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
+    "deploy": "vite build && wrangler pages deploy",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },

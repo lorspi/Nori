@@ -112,14 +112,20 @@ export default function App() {
     setFuture([]); // Clear redo future on new action
   }, []);
 
-  // Undo
+  // Undo. Undoing is silent; trying to undo with an empty history notifies once per session.
+  const emptyHistoryNotifiedRef = useRef(false);
   const handleUndo = useCallback(() => {
-    if (history.length === 0) return;
+    if (history.length === 0) {
+      if (!emptyHistoryNotifiedRef.current) {
+        emptyHistoryNotifiedRef.current = true;
+        showToast('No hay más acciones para deshacer');
+      }
+      return;
+    }
     const previous = history[history.length - 1];
     setHistory((prev) => prev.slice(0, prev.length - 1));
     setFuture((prev) => [JSON.parse(JSON.stringify(project)), ...prev]);
     setProject(previous);
-    showToast('Deshecho');
   }, [history, project]);
 
   // Redo
@@ -129,7 +135,6 @@ export default function App() {
     setFuture((prev) => prev.slice(1));
     setHistory((prev) => [...prev, JSON.parse(JSON.stringify(project))]);
     setProject(next);
-    showToast('Rehecho');
   }, [future, project]);
 
   // Prevent browser page zoom globally on Ctrl+Wheel
@@ -321,20 +326,21 @@ export default function App() {
     recordHistory(projectRef.current);
   }, [recordHistory]);
 
-  // Layer Properties Update (Supports atomic multi-property updates and undo control)
+  // Layer Properties Update (Supports atomic multi-property updates, several layers at once and undo control)
   const handleUpdateLayerProperties = useCallback((
-    layerId: string,
+    layerId: string | string[],
     properties: Partial<Layer['properties']>,
     recordUndo: boolean = true
   ) => {
     if (recordUndo) {
       recordHistory(project);
     }
+    const layerIds = Array.isArray(layerId) ? layerId : [layerId];
 
     setProject((prev) => ({
       ...prev,
       layers: prev.layers.map((layer) => {
-        if (layer.id !== layerId) return layer;
+        if (!layerIds.includes(layer.id)) return layer;
 
         // Animated properties are written as keyframes at the current frame;
         // static properties change the layer's base value
@@ -379,7 +385,7 @@ export default function App() {
 
   // Single Layer Property Update helper
   const handleUpdateLayerProperty = useCallback((
-    layerId: string,
+    layerId: string | string[],
     property: string,
     value: any,
     recordUndo: boolean = true
@@ -552,9 +558,9 @@ export default function App() {
   // Apply one easing curve to every selected keyframe. Paired properties that the Inspector
   // shows as a single parameter (Posición X/Y, Escala X/Y, Anclaje X/Y) get the same curve
   // on their keyframe at the same time, so the motion stays in sync.
-  const handleUpdateKeyframesEasing = (refs: KeyframeRef[], easing: EasingConfig) => {
+  const handleUpdateKeyframesEasing = (refs: KeyframeRef[], easing: EasingConfig, recordUndo: boolean = true) => {
     if (refs.length === 0) return;
-    recordHistory(project);
+    if (recordUndo) recordHistory(project);
 
     setProject((prev) => {
       const tolerance = frameTolerance(prev.fps);
@@ -705,6 +711,15 @@ export default function App() {
         ? `SVG animado importado: ${svgProject.layers.length} capas, ${svgProject.duration}s${skipped}`
         : `SVG importado: ${svgProject.layers.length} capas${skipped}`
     );
+  };
+
+  // Rename a layer (edited in place from the Inspector header)
+  const handleRenameLayer = (layerId: string, name: string) => {
+    recordHistory(project);
+    setProject((prev) => ({
+      ...prev,
+      layers: prev.layers.map((l) => (l.id === layerId ? { ...l, name } : l)),
+    }));
   };
 
   // Toggle Layer Visibility
@@ -981,13 +996,16 @@ export default function App() {
         <Inspector
           project={project}
           selectedLayer={selectedLayer}
+          selectedLayerIds={selectedLayerIds}
           selectedKeyframes={selectedKeyframes}
           onUpdateLayerProperty={handleUpdateLayerProperty}
           onUpdateLayerProperties={handleUpdateLayerProperties}
+          onRenameLayer={handleRenameLayer}
+          onStartScrub={handleStartDrag}
           onToggleAnimation={handleToggleAnimation}
           onUpdateKeyframesEasing={handleUpdateKeyframesEasing}
-          onUpdateProjectSettings={(settings) => {
-            recordHistory(project);
+          onUpdateProjectSettings={(settings, recordUndo = true) => {
+            if (recordUndo) recordHistory(project);
             setProject((prev) => ({ ...prev, ...settings }));
           }}
           onDeleteLayer={handleDeleteLayer}

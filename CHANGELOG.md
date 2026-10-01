@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.2.0] — 2026-09-30
+
+### Added
+
+- **Despliegue con un solo comando**
+  El script `npm run deploy` compila la aplicación y la publica en Cloudflare Pages. El nuevo archivo `wrangler.jsonc` define el proyecto (`nori`) y la carpeta del build (`./dist`), por lo que `wrangler pages deploy` ya no requiere indicar el directorio. Desde la rama `main` se publica en producción; desde cualquier otra rama se crea un despliegue de vista previa con su propia URL.
+
+- **Ajuste de valores arrastrando la etiqueta del campo**
+  Como en Figma, los valores numéricos del inspector se modifican arrastrando a los lados sobre la etiqueta del campo (X, Y, Ax, Ay, W, H, ∡, Op, Tamaño, rigidez, fricción y masa del resorte, y ancho, alto y duración del proyecto): hacia la derecha el valor aumenta y hacia la izquierda disminuye. Al pasar el cursor por la etiqueta aparece el cursor de flechas horizontales, Shift multiplica la velocidad por 10 y cada arrastre se deshace en un solo paso.
+
+- **Renombrar capas desde el inspector**
+  El nombre de la capa en el encabezado del panel derecho se edita en el mismo lugar, igual que el del proyecto: clic para escribir, Enter para guardar y Esc para cancelar.
+
+### Changed
+
+- **Campos numéricos sin flechas incrementales**
+  Los campos numéricos ya no muestran las flechas de incremento del navegador; el valor se escribe directamente o se ajusta arrastrando su etiqueta.
+
+- **Acciones de archivo en la barra superior**
+  La barra superior agrupa tres iconos: Nuevo proyecto, Abrir y Guardar. Abrir despliega las opciones "Abrir JSON / Lottie", "Importar SVG" (desde un archivo) y "Pegar SVG" (desde el portapapeles).
+
+- **Notificaciones de deshacer y rehacer**
+  Deshacer y rehacer ya no muestran una notificación en cada paso. Solo se avisa, una vez por sesión, cuando se intenta deshacer sin más historial disponible.
+
+### Fixed
+
+- **Color de relleno con varias capas seleccionadas**
+  Al cambiar el color con varias capas seleccionadas, el cambio se aplica a todas ellas y no solo a la capa mostrada en el inspector.
+
 ## [0.1.1] — 2026-09-30
 
 ### Added

@@ -11,6 +11,7 @@ import {
   Diamond,
 } from '@phosphor-icons/react';
 import { Layer, Project, EasingConfig, AnimatableProperty, KeyframeRef } from '../types/animation';
+import { ScrubLabel } from './ScrubLabel';
 import { evaluateEasing, getLayerPropertiesAtTime } from '../utils/interpolator';
 import {
   PROPERTY_META,
@@ -24,23 +25,68 @@ import {
 interface InspectorProps {
   project: Project;
   selectedLayer: Layer | null;
+  selectedLayerIds: string[];
   selectedKeyframes: KeyframeRef[];
-  onUpdateLayerProperty: (layerId: string, property: string, value: any) => void;
-  onUpdateLayerProperties: (layerId: string, properties: Partial<Layer['properties']>) => void;
+  onUpdateLayerProperty: (layerId: string | string[], property: string, value: any, recordUndo?: boolean) => void;
+  onUpdateLayerProperties: (layerId: string, properties: Partial<Layer['properties']>, recordUndo?: boolean) => void;
+  onRenameLayer: (layerId: string, name: string) => void;
+  // Records one undo step before a label drag (scrub) starts
+  onStartScrub: () => void;
   onToggleAnimation: (layerId: string, properties: AnimatableProperty[]) => void;
-  onUpdateKeyframesEasing: (refs: KeyframeRef[], easing: EasingConfig) => void;
-  onUpdateProjectSettings: (settings: Partial<Project>) => void;
+  onUpdateKeyframesEasing: (refs: KeyframeRef[], easing: EasingConfig, recordUndo?: boolean) => void;
+  onUpdateProjectSettings: (settings: Partial<Project>, recordUndo?: boolean) => void;
   onDeleteLayer: (layerId: string) => void;
   onDuplicateLayer: (layerId: string) => void;
   currentTime: number;
 }
 
+// Layer name renamed in place, like the project title (click to edit, Enter to save, Esc to cancel)
+const LayerNameInput: React.FC<{ name: string; onRename: (name: string) => void }> = ({ name, onRename }) => {
+  const [draft, setDraft] = useState(name);
+  useEffect(() => setDraft(name), [name]);
+
+  const commit = () => {
+    const next = draft.trim();
+    if (!next) {
+      setDraft(name);
+    } else if (next !== name) {
+      onRename(next);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          setDraft(name);
+          // Blur after the reset so the original name is kept
+          requestAnimationFrame(() => (e.target as HTMLInputElement).blur());
+        }
+      }}
+      maxLength={80}
+      spellCheck={false}
+      title="Clic para renombrar la capa"
+      aria-label="Nombre de la capa"
+      className="w-full min-w-0 bg-transparent border-0 font-semibold text-foreground hover:bg-accent focus:bg-secondary px-1.5 py-0.5 -ml-1.5 rounded-md focus:outline-none transition-colors focus:ring-1 focus:ring-ring truncate"
+    />
+  );
+};
+
 export const Inspector: React.FC<InspectorProps> = ({
   project,
   selectedLayer,
+  selectedLayerIds,
   selectedKeyframes,
   onUpdateLayerProperty,
   onUpdateLayerProperties,
+  onRenameLayer,
+  onStartScrub,
   onToggleAnimation,
   onUpdateKeyframesEasing,
   onUpdateProjectSettings,
@@ -100,16 +146,16 @@ export const Inspector: React.FC<InspectorProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [isPreviewRunning]);
 
-  const applyEasing = (easing: EasingConfig) => {
+  const applyEasing = (easing: EasingConfig, recordUndo = true) => {
     if (selectionRefs.length === 0) return;
-    onUpdateKeyframesEasing(selectionRefs, easing);
+    onUpdateKeyframesEasing(selectionRefs, easing, recordUndo);
   };
 
   const handleEasingTypeChange = (type: EasingConfig['type']) => {
     applyEasing({ ...currentEasing, type });
   };
 
-  const handleSpringParamChange = (param: 'stiffness' | 'damping' | 'mass', val: number) => {
+  const handleSpringParamChange = (param: 'stiffness' | 'damping' | 'mass', val: number, recordUndo = true) => {
     applyEasing({
       ...currentEasing,
       type: 'spring',
@@ -117,7 +163,7 @@ export const Inspector: React.FC<InspectorProps> = ({
         ...currentEasing.spring,
         [param]: Math.max(0.1, val),
       },
-    });
+    }, recordUndo);
   };
 
   const handleBezierParamChange = (param: 'x1' | 'y1' | 'x2' | 'y2', val: number) => {
@@ -275,7 +321,15 @@ export const Inspector: React.FC<InspectorProps> = ({
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-muted-foreground block mb-1">Ancho (px)</label>
+              <ScrubLabel
+                value={project.width}
+                min={1}
+                onScrubStart={onStartScrub}
+                onChange={(v) => onUpdateProjectSettings({ width: v }, false)}
+                className="text-muted-foreground block w-fit mb-1"
+              >
+                Ancho (px)
+              </ScrubLabel>
               <input
                 type="number"
                 value={project.width}
@@ -284,7 +338,15 @@ export const Inspector: React.FC<InspectorProps> = ({
               />
             </div>
             <div>
-              <label className="text-muted-foreground block mb-1">Alto (px)</label>
+              <ScrubLabel
+                value={project.height}
+                min={1}
+                onScrubStart={onStartScrub}
+                onChange={(v) => onUpdateProjectSettings({ height: v }, false)}
+                className="text-muted-foreground block w-fit mb-1"
+              >
+                Alto (px)
+              </ScrubLabel>
               <input
                 type="number"
                 value={project.height}
@@ -296,7 +358,17 @@ export const Inspector: React.FC<InspectorProps> = ({
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-muted-foreground block mb-1">Duración (s)</label>
+              <ScrubLabel
+                value={project.duration}
+                step={0.1}
+                min={0.5}
+                max={60}
+                onScrubStart={onStartScrub}
+                onChange={(v) => onUpdateProjectSettings({ duration: v }, false)}
+                className="text-muted-foreground block w-fit mb-1"
+              >
+                Duración (s)
+              </ScrubLabel>
               <input
                 type="number"
                 step="0.5"
@@ -352,6 +424,15 @@ export const Inspector: React.FC<InspectorProps> = ({
   const keyframeRange = getLayerKeyframeRange(selectedLayer);
   const layerId = selectedLayer.id;
 
+  // Scale fields are shown in %; with the aspect lock on, both axes change together
+  const setScale = (axis: 'scaleX' | 'scaleY', percent: number, recordUndo = true) => {
+    const val = percent / 100;
+    onUpdateLayerProperties(layerId, aspectLocked ? { scaleX: val, scaleY: val } : { [axis]: val }, recordUndo);
+  };
+
+  // Color changes apply to every selected layer when the Inspector's layer is part of the selection
+  const fillTargets = selectedLayerIds.includes(layerId) ? selectedLayerIds : [layerId];
+
   // Keyframe icon: gray = not animated, blue = animated (filled when a keyframe sits on the current frame)
   const renderAnimToggle = (properties: AnimatableProperty[], label: string) => {
     const tracks = selectedLayer.tracks.filter((t) => properties.includes(t.property));
@@ -380,12 +461,10 @@ export const Inspector: React.FC<InspectorProps> = ({
       <div className="space-y-3">
         {/* Layer Header */}
         <div className="flex items-center justify-between pb-2 border-b border-border">
-          <div className="flex items-center gap-2 truncate">
-            <span className="font-semibold text-foreground capitalize truncate">
-              {selectedLayer.name}
-            </span>
+          <div className="flex-1 min-w-0 mr-2">
+            <LayerNameInput name={selectedLayer.name} onRename={(name) => onRenameLayer(selectedLayer.id, name)} />
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => onDuplicateLayer(selectedLayer.id)}
               className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent"
@@ -486,7 +565,14 @@ export const Inspector: React.FC<InspectorProps> = ({
           {currentEasing.type === 'spring' && (
             <div className="space-y-1.5 font-mono text-[11px] bg-secondary border border-border rounded-md p-2">
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Stiffness (Rigidez)</span>
+                <ScrubLabel
+                  value={currentEasing.spring.stiffness}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => handleSpringParamChange('stiffness', v, false)}
+                  className="text-muted-foreground"
+                >
+                  Stiffness (Rigidez)
+                </ScrubLabel>
                 <input
                   type="number"
                   step="5"
@@ -496,7 +582,15 @@ export const Inspector: React.FC<InspectorProps> = ({
                 />
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Damping (Fricción)</span>
+                <ScrubLabel
+                  value={currentEasing.spring.damping}
+                  step={0.1}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => handleSpringParamChange('damping', v, false)}
+                  className="text-muted-foreground"
+                >
+                  Damping (Fricción)
+                </ScrubLabel>
                 <input
                   type="number"
                   step="0.5"
@@ -506,7 +600,16 @@ export const Inspector: React.FC<InspectorProps> = ({
                 />
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Mass (Masa)</span>
+                <ScrubLabel
+                  value={currentEasing.spring.mass}
+                  step={0.01}
+                  min={0.1}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => handleSpringParamChange('mass', v, false)}
+                  className="text-muted-foreground"
+                >
+                  Mass (Masa)
+                </ScrubLabel>
                 <input
                   type="number"
                   step="0.1"
@@ -580,7 +683,14 @@ export const Inspector: React.FC<InspectorProps> = ({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
-                <span className="text-muted-foreground font-mono">X</span>
+                <ScrubLabel
+                  value={Math.round(p.x)}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => onUpdateLayerProperty(layerId, 'x', v, false)}
+                  className="text-muted-foreground font-mono"
+                >
+                  X
+                </ScrubLabel>
                 <input
                   type="number"
                   value={Math.round(p.x)}
@@ -590,7 +700,14 @@ export const Inspector: React.FC<InspectorProps> = ({
                 />
               </div>
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
-                <span className="text-muted-foreground font-mono">Y</span>
+                <ScrubLabel
+                  value={Math.round(p.y)}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => onUpdateLayerProperty(layerId, 'y', v, false)}
+                  className="text-muted-foreground font-mono"
+                >
+                  Y
+                </ScrubLabel>
                 <input
                   type="number"
                   value={Math.round(p.y)}
@@ -623,7 +740,14 @@ export const Inspector: React.FC<InspectorProps> = ({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
-                <span className="text-muted-foreground font-mono text-[10px]">Ax</span>
+                <ScrubLabel
+                  value={Math.round(p.anchorX || 0)}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => onUpdateLayerProperty(layerId, 'anchorX', v, false)}
+                  className="text-muted-foreground font-mono text-[10px]"
+                >
+                  Ax
+                </ScrubLabel>
                 <input
                   type="number"
                   value={Math.round(p.anchorX || 0)}
@@ -633,7 +757,14 @@ export const Inspector: React.FC<InspectorProps> = ({
                 />
               </div>
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
-                <span className="text-muted-foreground font-mono text-[10px]">Ay</span>
+                <ScrubLabel
+                  value={Math.round(p.anchorY || 0)}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => onUpdateLayerProperty(layerId, 'anchorY', v, false)}
+                  className="text-muted-foreground font-mono text-[10px]"
+                >
+                  Ay
+                </ScrubLabel>
                 <input
                   type="number"
                   value={Math.round(p.anchorY || 0)}
@@ -652,14 +783,18 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
           <div className="flex items-center gap-1.5">
             <div className="flex-1 flex items-center gap-1 bg-secondary border border-border rounded-md px-2 py-1">
-              <span className="text-muted-foreground font-mono">W</span>
+              <ScrubLabel
+                value={Math.round((p.scaleX ?? 1) * 100)}
+                onScrubStart={onStartScrub}
+                onChange={(v) => setScale('scaleX', v, false)}
+                className="text-muted-foreground font-mono"
+              >
+                W
+              </ScrubLabel>
               <input
                 type="number"
                 value={Math.round((p.scaleX ?? 1) * 100)}
-                onChange={(e) => {
-                  const val = Number(e.target.value) / 100;
-                  onUpdateLayerProperties(layerId, aspectLocked ? { scaleX: val, scaleY: val } : { scaleX: val });
-                }}
+                onChange={(e) => setScale('scaleX', Number(e.target.value))}
                 className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
               />
               <span className="text-muted-foreground font-mono text-[10px]">%</span>
@@ -678,14 +813,18 @@ export const Inspector: React.FC<InspectorProps> = ({
             </button>
 
             <div className="flex-1 flex items-center gap-1 bg-secondary border border-border rounded-md px-2 py-1">
-              <span className="text-muted-foreground font-mono">H</span>
+              <ScrubLabel
+                value={Math.round((p.scaleY ?? 1) * 100)}
+                onScrubStart={onStartScrub}
+                onChange={(v) => setScale('scaleY', v, false)}
+                className="text-muted-foreground font-mono"
+              >
+                H
+              </ScrubLabel>
               <input
                 type="number"
                 value={Math.round((p.scaleY ?? 1) * 100)}
-                onChange={(e) => {
-                  const val = Number(e.target.value) / 100;
-                  onUpdateLayerProperties(layerId, aspectLocked ? { scaleX: val, scaleY: val } : { scaleY: val });
-                }}
+                onChange={(e) => setScale('scaleY', Number(e.target.value))}
                 className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
               />
               <span className="text-muted-foreground font-mono text-[10px]">%</span>
@@ -705,7 +844,14 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
-              <span className="text-muted-foreground font-mono">∡</span>
+              <ScrubLabel
+                value={Math.round(p.rotation || 0)}
+                onScrubStart={onStartScrub}
+                onChange={(v) => onUpdateLayerProperty(layerId, 'rotation', v, false)}
+                className="text-muted-foreground font-mono"
+              >
+                ∡
+              </ScrubLabel>
               <input
                 type="number"
                 value={Math.round(p.rotation || 0)}
@@ -715,7 +861,16 @@ export const Inspector: React.FC<InspectorProps> = ({
               <span className="text-muted-foreground font-mono text-[10px]">°</span>
             </div>
             <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
-              <span className="text-muted-foreground font-mono">Op</span>
+              <ScrubLabel
+                value={Math.round((p.opacity ?? 1) * 100)}
+                min={0}
+                max={100}
+                onScrubStart={onStartScrub}
+                onChange={(v) => onUpdateLayerProperty(layerId, 'opacity', v / 100, false)}
+                className="text-muted-foreground font-mono"
+              >
+                Op
+              </ScrubLabel>
               <input
                 type="number"
                 min="0"
@@ -743,7 +898,15 @@ export const Inspector: React.FC<InspectorProps> = ({
             />
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <span className="text-muted-foreground block mb-0.5 text-[10px]">Tamaño</span>
+                <ScrubLabel
+                  value={p.fontSize || 32}
+                  min={1}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => onUpdateLayerProperty(layerId, 'fontSize', v, false)}
+                  className="text-muted-foreground block w-fit mb-0.5 text-[10px]"
+                >
+                  Tamaño
+                </ScrubLabel>
                 <input
                   type="number"
                   value={p.fontSize || 32}
@@ -780,13 +943,13 @@ export const Inspector: React.FC<InspectorProps> = ({
             <input
               type="color"
               value={p.fill.startsWith('#') ? p.fill : '#0084ff'}
-              onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'fill', e.target.value)}
+              onChange={(e) => onUpdateLayerProperty(fillTargets, 'fill', e.target.value)}
               className="w-7 h-7 rounded-md border border-border bg-transparent cursor-pointer"
             />
             <input
               type="text"
               value={p.fill}
-              onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'fill', e.target.value)}
+              onChange={(e) => onUpdateLayerProperty(fillTargets, 'fill', e.target.value)}
               className="flex-1 bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
             />
           </div>

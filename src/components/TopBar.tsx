@@ -75,22 +75,22 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const svgInputRef = useRef<HTMLInputElement>(null);
-  const svgMenuRef = useRef<HTMLDivElement>(null);
-  const [showSvgMenu, setShowSvgMenu] = useState(false);
+  const openMenuRef = useRef<HTMLDivElement>(null);
+  const [showOpenMenu, setShowOpenMenu] = useState(false);
   const [titleDraft, setTitleDraft] = useState(project.title);
 
   // Keep the editable title in sync when another project is opened
   useEffect(() => setTitleDraft(project.title), [project.title]);
 
-  // Close the SVG import menu when clicking outside of it
+  // Close the Open menu when clicking outside of it
   useEffect(() => {
-    if (!showSvgMenu) return;
+    if (!showOpenMenu) return;
     const handleMouseDown = (e: MouseEvent) => {
-      if (svgMenuRef.current && !svgMenuRef.current.contains(e.target as Node)) setShowSvgMenu(false);
+      if (openMenuRef.current && !openMenuRef.current.contains(e.target as Node)) setShowOpenMenu(false);
     };
     window.addEventListener('mousedown', handleMouseDown);
     return () => window.removeEventListener('mousedown', handleMouseDown);
-  }, [showSvgMenu]);
+  }, [showOpenMenu]);
 
   const commitTitle = () => {
     const next = titleDraft.trim();
@@ -297,25 +297,71 @@ export const TopBar: React.FC<TopBarProps> = ({
           </div>
         </div>
 
-        {/* New project and JSON actions */}
-        <div className="flex items-center gap-1 ml-1.5">
+        {/* File actions (icons only): new project, open menu and save */}
+        <div className="flex items-center bg-secondary rounded-lg p-0.5 border border-border ml-1">
           <button
             onClick={onNewProject}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-foreground bg-secondary hover:bg-accent border border-border rounded-lg font-semibold transition-colors"
-            title="Crear un proyecto nuevo en blanco"
+            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            title="Nuevo proyecto"
+            aria-label="Nuevo proyecto"
           >
-            <FilePlus className="w-3.5 h-3.5 text-bento-blue" />
-            <span className="hidden md:inline">Nuevo proyecto</span>
+            <FilePlus className="w-3.5 h-3.5" />
           </button>
 
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-foreground bg-secondary hover:bg-accent border border-border rounded-lg font-semibold transition-colors"
-            title="Abrir animación JSON de Lottie o proyecto Nori"
-          >
-            <FolderOpen className="w-3.5 h-3.5 text-bento-blue" />
-            <span>Abrir JSON / Lottie</span>
-          </button>
+          {/* Open: Lottie / Nori JSON, SVG from a file or SVG pasted from the clipboard */}
+          <div className="relative" ref={openMenuRef}>
+            <button
+              onClick={() => setShowOpenMenu((prev) => !prev)}
+              className={`p-1.5 rounded-md transition-colors flex items-center gap-0.5 ${
+                showOpenMenu
+                  ? 'bg-accent text-foreground'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+              }`}
+              title="Abrir"
+              aria-label="Abrir"
+              aria-haspopup="menu"
+              aria-expanded={showOpenMenu}
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+            </button>
+
+            {showOpenMenu && (
+              <div
+                className="absolute left-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 w-48 z-50 text-foreground"
+                onClick={() => setShowOpenMenu(false)}
+                role="menu"
+              >
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
+                  title="Abrir animación JSON de Lottie o proyecto Nori"
+                  role="menuitem"
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-bento-blue" />
+                  <span>Abrir JSON / Lottie</span>
+                </button>
+                <button
+                  onClick={() => svgInputRef.current?.click()}
+                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
+                  title="Abrir un archivo SVG como proyecto (si es animado, sus animaciones pasan a la línea del tiempo)"
+                  role="menuitem"
+                >
+                  <FileSvg className="w-3.5 h-3.5 text-bento-blue" />
+                  <span>Importar SVG</span>
+                </button>
+                <button
+                  onClick={onOpenPasteSvg}
+                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
+                  title="Pegar el código de un SVG desde el portapapeles"
+                  role="menuitem"
+                >
+                  <ClipboardText className="w-3.5 h-3.5 text-bento-blue" />
+                  <span>Pegar SVG</span>
+                </button>
+              </div>
+            )}
+          </div>
           <input
             type="file"
             ref={fileInputRef}
@@ -323,41 +369,6 @@ export const TopBar: React.FC<TopBarProps> = ({
             accept=".json,.nori.json"
             className="hidden"
           />
-
-          {/* SVG import: from a file or pasted from the clipboard */}
-          <div className="relative" ref={svgMenuRef}>
-            <button
-              onClick={() => setShowSvgMenu((prev) => !prev)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-foreground bg-secondary hover:bg-accent border border-border rounded-lg font-semibold transition-colors"
-              title="Abrir un SVG como proyecto (si es animado, sus animaciones pasan a la línea del tiempo)"
-            >
-              <FileSvg className="w-3.5 h-3.5 text-bento-blue" />
-              <span className="hidden md:inline">Importar SVG</span>
-              <ChevronDown className="w-2.5 h-2.5 opacity-60" />
-            </button>
-
-            {showSvgMenu && (
-              <div
-                className="absolute left-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 w-48 z-50 text-foreground"
-                onClick={() => setShowSvgMenu(false)}
-              >
-                <button
-                  onClick={() => svgInputRef.current?.click()}
-                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
-                >
-                  <FolderOpen className="w-3.5 h-3.5 text-bento-blue" />
-                  <span>Desde archivo…</span>
-                </button>
-                <button
-                  onClick={onOpenPasteSvg}
-                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
-                >
-                  <ClipboardText className="w-3.5 h-3.5 text-bento-blue" />
-                  <span>Desde portapapeles…</span>
-                </button>
-              </div>
-            )}
-          </div>
           <input
             type="file"
             ref={svgInputRef}
@@ -368,11 +379,11 @@ export const TopBar: React.FC<TopBarProps> = ({
 
           <button
             onClick={onSaveJson}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-foreground bg-secondary hover:bg-accent border border-border rounded-lg font-semibold transition-colors"
-            title="Guardar proyecto localmente como JSON"
+            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            title="Guardar proyecto como JSON"
+            aria-label="Guardar"
           >
-            <Save className="w-3 h-3 text-muted-foreground" />
-            <span className="hidden lg:inline">Guardar</span>
+            <Save className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
