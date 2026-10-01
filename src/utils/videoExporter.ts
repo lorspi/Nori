@@ -254,12 +254,6 @@ export async function exportProject(
       return { blob, filename: `${baseName}.svg` };
     }
 
-    case 'json': {
-      const jsonString = JSON.stringify(project, null, 2);
-      const blob = new Blob([jsonString], { type: 'application/json' });
-      return { blob, filename: `${baseName}.nori.json` };
-    }
-
     default:
       throw new Error(`Unsupported export format: ${settings.format}`);
   }

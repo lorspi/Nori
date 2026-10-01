@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.4.0] — 2026-10-01
+
+### Added
+
+- **Guardar con Ctrl + S**
+  Ctrl + S (Cmd + S en Mac) descarga el proyecto como JSON, igual que el botón Guardar, en lugar de abrir el diálogo "Guardar página" del navegador. Funciona también mientras se escribe en un campo.
+
+- **Mover capas con las flechas del teclado**
+  Las flechas mueven las capas seleccionadas 1 px, o 10 px con Shift. Si la posición está animada, el cambio se guarda como fotograma clave en el tiempo actual. Las capas bloqueadas u ocultas no se mueven, y mantener una flecha pulsada se deshace en un solo paso.
+
+- **Navegar por fotogramas clave**
+  Los controles de la línea del tiempo tienen dos botones nuevos, "Ir al fotograma clave anterior" e "Ir al fotograma clave siguiente", que saltan al fotograma clave más cercano de cualquier capa.
+
+- **Proyecto de ejemplo**
+  El menú Abrir tiene la opción "Proyecto de ejemplo", que abre la animación del logo de Nori que se muestra en la primera visita y la reproduce. Si hay cambios sin guardar, primero se pide confirmación, como al abrir cualquier otro proyecto.
+
+- **Vista previa del SVG en vivo**
+  Al elegir SVG en la ventana de exportar, la animación se muestra al momento, sin renderizar, y se actualiza con el color de fondo, la transparencia y los FPS. El botón Descargar está disponible de inmediato.
+
+### Changed
+
+- **Atajos de la línea del tiempo con F y G**
+  F retrocede y G avanza: solos, un fotograma; con Ctrl, al fotograma clave anterior o siguiente; con Shift, al inicio o al final de la línea del tiempo. Las flechas izquierda y derecha ya no mueven el cursor de tiempo, porque ahora mueven las capas seleccionadas.
+
+- **Tooltips propios**
+  Todos los tooltips de Nori usan un diseño propio en lugar del del navegador: una etiqueta oscura bajo el elemento que aparece tras una breve pausa y, al pasar a un botón vecino, cambia sin esperar. Los que tienen atajo lo muestran con teclas, por ejemplo [Ctrl] [G]. En Mac, Ctrl se muestra como ⌘.
+
+- **Ventana Exportar Animación**
+  - La vista previa del render se muestra a la derecha de los ajustes, y no debajo. A la izquierda, los formatos ocupan dos filas y Resolución y Velocidad (FPS) tienen cada uno su propia línea.
+  - Cada formato conserva su render al cambiar a otro formato (y al cerrar y volver a abrir la ventana). Un punto verde marca los formatos que ya tienen render, y el botón de la papelera lo borra para repetirlo. Si el proyecto cambió después del render, se avisa bajo la vista previa.
+  - Mientras un render está en curso se puede ver otro formato; el render sigue y su resultado se guarda en su formato.
+  - Resolución y Velocidad usan el mismo menú desplegable que el resto del editor. En SVG, Resolución queda desactivada porque el vector no depende de ella.
+  - El color de fondo se elige con la misma muestra de color y campo hexadecimal del panel derecho.
+  - Se quitó la opción JSON: el proyecto se guarda con el botón Guardar o con Ctrl + S.
+
+- **Ayuda de atajos del lienzo plegable**
+  La barra de atajos de la esquina inferior izquierda del lienzo ("Espacio + Arrastrar: Desplazar · Ctrl + Rueda: Zoom · Shift + Clic: Selección múltiple") se cierra con su botón X y queda como un pequeño botón "?" que la vuelve a mostrar. Nori recuerda en el navegador si estaba abierta o cerrada.
+
+- **Menús desplegables unificados**
+  Los selectores que usaban el desplegable nativo del navegador (FPS en los ajustes del proyecto y Grosor de los textos) usan ahora el mismo componente que la curva de suavizado, el zoom y la ventana de exportar: se cierran al hacer clic fuera o con Esc y marcan la opción elegida con un check.
+
+### Fixed
+
+- **Deshacer un cambio de color**
+  Al elegir un color con el selector, el navegador envía un cambio por cada movimiento dentro del selector, y cada uno se guardaba como un paso del historial, así que deshacer recorría el color poco a poco. Ahora cada elección de color completa se deshace en un solo paso, en el relleno, el trazo y el fondo del lienzo. Escribir un valor hexadecimal también cuenta como un solo paso por cada vez que se edita el campo.
+
 ## [0.3.0] — 2026-09-30
 
 ### Added

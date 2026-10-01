@@ -124,7 +124,7 @@ export interface Project {
   layers: Layer[];
 }
 
-export type ExportFormat = 'gif' | 'mp4' | 'webm' | 'svg' | 'json';
+export type ExportFormat = 'gif' | 'mp4' | 'webm' | 'svg';
 
 export interface ExportSettings {
   format: ExportFormat;

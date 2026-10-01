@@ -57,6 +57,7 @@ interface TopBarProps {
   onLoadJson: (project: Project, message?: string) => void;
   onImportSvg: (svgText: string, fileName: string) => void;
   onOpenPasteSvg: () => void;
+  onOpenExample: () => void;
   onRenameProject: (title: string) => void;
   onAddLayer: (type: ShapeType) => void;
   onShowToast?: (message: string, type?: ToastType) => void;
@@ -81,6 +82,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onLoadJson,
   onImportSvg,
   onOpenPasteSvg,
+  onOpenExample,
   onRenameProject,
   onAddLayer,
   onShowToast,
@@ -194,7 +196,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={onUndo}
             disabled={!canUndo}
-            title="Deshacer (Ctrl+Z / Cmd+Z)"
+            data-tooltip="Deshacer"
+            data-shortcut="Ctrl+Z"
             className={`p-1.5 rounded-md transition-colors ${
               canUndo
                 ? 'text-foreground hover:bg-accent'
@@ -206,7 +209,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={onRedo}
             disabled={!canRedo}
-            title="Rehacer (Ctrl+Y / Cmd+Shift+Z)"
+            data-tooltip="Rehacer"
+            data-shortcut="Ctrl+Y / Ctrl+Shift+Z"
             className={`p-1.5 rounded-md transition-colors ${
               canRedo
                 ? 'text-foreground hover:bg-accent'
@@ -221,7 +225,8 @@ export const TopBar: React.FC<TopBarProps> = ({
         <div className="flex items-center bg-secondary rounded-lg p-0.5 border border-border">
           <button
             onClick={() => setActiveTool('select')}
-            title="Seleccionar (V)"
+            data-tooltip="Seleccionar"
+            data-shortcut="V"
             className={`p-1.5 rounded-md transition-colors ${
               activeTool === 'select'
                 ? 'bg-bento-blue text-white'
@@ -232,7 +237,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           </button>
           <button
             onClick={() => setActiveTool('hand')}
-            title="Mano / Desplazar lienzo (H o Mantener Espacio)"
+            data-tooltip="Mano: desplazar el lienzo (o mantén Espacio)"
+            data-shortcut="H"
             className={`p-1.5 rounded-md transition-colors ${
               activeTool === 'hand'
                 ? 'bg-bento-blue text-white'
@@ -245,7 +251,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <div className="relative">
             <button
               onClick={() => setShowShapesDropdown(!showShapesDropdown)}
-              title="Añadir Formas / Vectores"
+              data-tooltip="Añadir forma"
               className={`p-1.5 rounded-md transition-colors flex items-center gap-0.5 ${
                 showShapesDropdown
                   ? 'bg-bento-blue text-white'
@@ -281,7 +287,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={onNewProject}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            title="Nuevo proyecto"
+            data-tooltip="Nuevo proyecto"
             aria-label="Nuevo proyecto"
           >
             <FilePlus className="w-3.5 h-3.5" />
@@ -296,7 +302,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   ? 'bg-accent text-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-accent'
               }`}
-              title="Abrir"
+              data-tooltip="Abrir"
               aria-label="Abrir"
               aria-haspopup="menu"
               aria-expanded={showOpenMenu}
@@ -307,14 +313,14 @@ export const TopBar: React.FC<TopBarProps> = ({
 
             {showOpenMenu && (
               <div
-                className="absolute left-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 w-48 z-50 text-foreground"
+                className="absolute left-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 w-52 z-50 text-foreground"
                 onClick={() => setShowOpenMenu(false)}
                 role="menu"
               >
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
-                  title="Abrir animación JSON de Lottie o proyecto Nori"
+                  data-tooltip="Abrir animación JSON de Lottie o proyecto Nori"
                   role="menuitem"
                 >
                   <FolderOpen className="w-3.5 h-3.5 text-bento-blue" />
@@ -323,7 +329,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <button
                   onClick={() => svgInputRef.current?.click()}
                   className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
-                  title="Abrir un archivo SVG como proyecto (si es animado, sus animaciones pasan a la línea del tiempo)"
+                  data-tooltip="Abrir un archivo SVG como proyecto (si es animado, sus animaciones pasan a la línea del tiempo)"
                   role="menuitem"
                 >
                   <FileSvg className="w-3.5 h-3.5 text-bento-blue" />
@@ -332,11 +338,21 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <button
                   onClick={onOpenPasteSvg}
                   className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
-                  title="Pegar el código de un SVG desde el portapapeles"
+                  data-tooltip="Pegar el código de un SVG desde el portapapeles"
                   role="menuitem"
                 >
                   <ClipboardText className="w-3.5 h-3.5 text-bento-blue" />
                   <span>Pegar SVG</span>
+                </button>
+                <div className="my-1 border-t border-border" />
+                <button
+                  onClick={onOpenExample}
+                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
+                  data-tooltip="Abrir la animación del logo de Nori que se muestra en la primera visita"
+                  role="menuitem"
+                >
+                  <img src="/icon.svg" alt="" className="w-3.5 h-3.5" />
+                  <span>Proyecto de ejemplo</span>
                 </button>
               </div>
             )}
@@ -359,7 +375,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={onSaveJson}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            title="Guardar proyecto como JSON"
+            data-tooltip="Guardar proyecto como JSON"
+            data-shortcut="Ctrl+S"
             aria-label="Guardar"
           >
             <Save className="w-3.5 h-3.5" />
@@ -386,7 +403,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           size={Math.max(8, titleDraft.length + 1)}
           maxLength={80}
           spellCheck={false}
-          title="Clic para renombrar el proyecto"
+          data-tooltip="Clic para renombrar el proyecto"
           aria-label="Nombre del proyecto"
           className="max-w-[16rem] bg-transparent border-0 text-center text-foreground font-semibold text-sm tracking-tight font-heading hover:bg-accent focus:bg-card px-2 py-1 rounded-xl focus:outline-none transition-colors focus:ring-1 focus:ring-ring truncate"
         />
@@ -402,7 +419,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               ? 'bg-bento-blue/15 border-bento-blue/40 text-bento-blue'
               : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
           }`}
-          title="Alternar fondo transparente con patrón ajedrez"
+          data-tooltip="Alternar fondo transparente con patrón ajedrez"
         >
           <Grid className="w-3 h-3" />
           <span className="hidden sm:inline">Transparencia</span>
@@ -423,7 +440,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={onOpenAbout}
           className="w-8 h-8 rounded-lg bg-card border border-border shadow-card flex items-center justify-center text-foreground hover:bg-accent transition-all duration-300 ease-out cursor-pointer"
-          title="Acerca de Nori"
+          data-tooltip="Acerca de Nori"
           aria-label="Acerca de Nori"
         >
           <Info className="w-4 h-4" />

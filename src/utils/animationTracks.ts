@@ -114,3 +114,20 @@ export const getLayerKeyframeRefs = (layer: Layer): KeyframeRef[] =>
   layer.tracks.flatMap((t) =>
     t.keyframes.map((k) => ({ layerId: layer.id, property: t.property, keyframeId: k.id }))
   );
+
+// Nearest keyframe time before (-1) or after (1) the given time, across every layer.
+// Returns null when there is none in that direction.
+export function getAdjacentKeyframeTime(project: Project, time: number, direction: -1 | 1): number | null {
+  const tolerance = frameTolerance(project.fps);
+  let best: number | null = null;
+  for (const layer of project.layers) {
+    for (const track of layer.tracks) {
+      for (const kf of track.keyframes) {
+        const isAhead = direction === 1 ? kf.time > time + tolerance : kf.time < time - tolerance;
+        if (!isAhead) continue;
+        if (best === null || (direction === 1 ? kf.time < best : kf.time > best)) best = kf.time;
+      }
+    }
+  }
+  return best;
+}

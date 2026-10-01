@@ -72,7 +72,8 @@ export const ScrubLabel: React.FC<ScrubLabelProps> = ({
   return (
     <span
       onPointerDown={handlePointerDown}
-      title={title ?? 'Arrastra a los lados para cambiar el valor (Shift: más rápido)'}
+      data-tooltip={title ?? 'Arrastra a los lados para cambiar el valor. Más rápido con'}
+      data-shortcut={title ? undefined : 'Shift'}
       className={`cursor-ew-resize touch-none select-none ${className}`}
     >
       {children}

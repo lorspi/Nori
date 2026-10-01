@@ -26,6 +26,7 @@ import {
   createKeyframe,
   createTrack,
   frameTolerance,
+  getAdjacentKeyframeTime,
   getSiblingProperty,
   isSameKeyframeRef,
   resolveKeyframeRefs,
@@ -34,6 +35,14 @@ import {
 } from './utils/animationTracks';
 import AboutNori from './components/AboutNori';
 import { useUI, ToastType } from './lib/ui';
+
+// Arrow key -> canvas direction
+const ARROW_DIRECTIONS: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
 
 export default function App() {
   // Reopen the last project; the very first time, show the Nori intro animation playing
@@ -274,6 +283,13 @@ export default function App() {
         return;
       }
 
+      // Save the project as JSON (also while typing, instead of the browser's "Save page")
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (!e.repeat) handleSaveJson();
+        return;
+      }
+
       // Ignore if user is typing in an input
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
         return;
@@ -296,15 +312,38 @@ export default function App() {
         return;
       }
 
+      // Timeline navigation: F goes back, G goes forward.
+      // Alone: one frame · Ctrl: previous / next keyframe · Shift: start / end
+      if ((e.code === 'KeyF' || e.code === 'KeyG') && !e.altKey) {
+        const direction = e.code === 'KeyG' ? 1 : -1;
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          handleSeekKeyframe(direction);
+        } else if (e.shiftKey) {
+          e.preventDefault();
+          setCurrentTime(direction === 1 ? project.duration : 0);
+        } else {
+          e.preventDefault();
+          handleStepFrame(direction);
+        }
+        return;
+      }
+
+      // Arrow keys move the selected layers 1 px (Shift: 10 px)
+      const arrow = ARROW_DIRECTIONS[e.code];
+      if (arrow) {
+        if (selectedLayerIds.length > 0 && !vertexEditLayerId && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 1;
+          // Holding the key down is a single undo step
+          handleNudgeLayers(selectedLayerIds, arrow[0] * step, arrow[1] * step, !e.repeat);
+        }
+        return;
+      }
+
       if (e.code === 'Space') {
         e.preventDefault();
         setIsPlaying((prev) => !prev);
-      } else if (e.code === 'ArrowLeft') {
-        e.preventDefault();
-        setCurrentTime((prev) => Math.max(0, Number((prev - 1 / project.fps).toFixed(3))));
-      } else if (e.code === 'ArrowRight') {
-        e.preventDefault();
-        setCurrentTime((prev) => Math.min(project.duration, Number((prev + 1 / project.fps).toFixed(3))));
       } else if (e.code === 'KeyV') {
         setActiveTool('select');
       } else if (e.code === 'KeyH') {
@@ -401,6 +440,30 @@ export default function App() {
   ) => {
     handleUpdateLayerProperties(layerId, { [property]: value }, recordUndo);
   }, [handleUpdateLayerProperties]);
+
+  // Move layers on the canvas by an offset (arrow keys). Locked and hidden layers stay put.
+  const handleNudgeLayers = (layerIds: string[], dx: number, dy: number, recordUndo: boolean) => {
+    const movable = projectRef.current.layers.filter((l) => layerIds.includes(l.id) && l.visible && !l.locked);
+    if (movable.length === 0) return;
+    if (recordUndo) recordHistory(projectRef.current);
+    for (const layer of movable) {
+      const current = getLayerPropertiesAtTime(layer, currentTime);
+      handleUpdateLayerProperties(layer.id, { x: current.x + dx, y: current.y + dy }, false);
+    }
+  };
+
+  // Step one frame back (-1) or forward (1)
+  const handleStepFrame = (direction: -1 | 1) => {
+    setCurrentTime((prev) =>
+      Math.max(0, Math.min(project.duration, Number((prev + direction / project.fps).toFixed(3))))
+    );
+  };
+
+  // Jump to the previous / next keyframe of any layer
+  const handleSeekKeyframe = (direction: -1 | 1) => {
+    const time = getAdjacentKeyframeTime(project, currentTime, direction);
+    if (time !== null) setCurrentTime(time);
+  };
 
   // Add / remove a keyframe at the given time on an animated property (toggle)
   const handleAddKeyframe = (layerId: string, property: AnimatableProperty, time: number) => {
@@ -908,13 +971,15 @@ export default function App() {
   const [pendingProjectToOpen, setPendingProjectToOpen] = useState<{
     project: Project;
     message?: string;
+    autoplay?: boolean;
   } | null>(null);
 
   // Directly apply project loading
-  const handleApplyOpenProject = (newProject: Project, message?: string) => {
+  const handleApplyOpenProject = (newProject: Project, message?: string, autoplay = false) => {
     recordHistory(project);
     setProject(newProject);
     setCurrentTime(0);
+    if (autoplay) setIsPlaying(true);
     setSelectedLayerId(newProject.layers[0]?.id || null);
     setSelectedKeyframes([]);
     setHistory([]);
@@ -923,13 +988,18 @@ export default function App() {
   };
 
   // Request to open another project (intercepted with confirmation modal)
-  const handleRequestOpenProject = (newProject: Project, message?: string) => {
-    setPendingProjectToOpen({ project: newProject, message });
+  const handleRequestOpenProject = (newProject: Project, message?: string, autoplay = false) => {
+    setPendingProjectToOpen({ project: newProject, message, autoplay });
+  };
+
+  // Example project: the Nori logo animation shown on the first visit
+  const handleOpenExampleProject = () => {
+    handleRequestOpenProject(JSON.parse(JSON.stringify(NORI_INTRO_PROJECT)), 'Proyecto de ejemplo abierto', true);
   };
 
   const handleConfirmOpenWithoutSaving = () => {
     if (pendingProjectToOpen) {
-      handleApplyOpenProject(pendingProjectToOpen.project, pendingProjectToOpen.message);
+      handleApplyOpenProject(pendingProjectToOpen.project, pendingProjectToOpen.message, pendingProjectToOpen.autoplay);
       setPendingProjectToOpen(null);
     }
   };
@@ -937,7 +1007,7 @@ export default function App() {
   const handleSaveAndConfirmOpen = () => {
     handleSaveJson();
     if (pendingProjectToOpen) {
-      handleApplyOpenProject(pendingProjectToOpen.project, pendingProjectToOpen.message);
+      handleApplyOpenProject(pendingProjectToOpen.project, pendingProjectToOpen.message, pendingProjectToOpen.autoplay);
       setPendingProjectToOpen(null);
     }
   };
@@ -991,6 +1061,7 @@ export default function App() {
         onLoadJson={handleRequestOpenProject}
         onImportSvg={handleImportSvg}
         onOpenPasteSvg={() => setIsPasteSvgOpen(true)}
+        onOpenExample={handleOpenExampleProject}
         onRenameProject={(title) => {
           recordHistory(project);
           setProject((prev) => ({ ...prev, title }));
@@ -1067,6 +1138,7 @@ export default function App() {
         onCopyLayerAnimation={handleCopyLayerAnimation}
         onPaste={handlePaste}
         onStartKeyframeDrag={handleStartDrag}
+        onSeekKeyframe={handleSeekKeyframe}
       />
 
       {/* Modals */}

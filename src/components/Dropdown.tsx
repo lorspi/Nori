@@ -25,6 +25,7 @@ interface DropdownProps<T> {
   optionClassName?: string;
   title?: string;
   ariaLabel?: string;
+  disabled?: boolean;
 }
 
 // Button + floating menu with a check on the selected option. Closes on selection,
@@ -41,6 +42,7 @@ export function Dropdown<T>({
   optionClassName = 'font-mono',
   title,
   ariaLabel,
+  disabled = false,
 }: DropdownProps<T>) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -68,8 +70,9 @@ export function Dropdown<T>({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className={`flex items-center gap-1 px-2 h-8 bg-secondary border border-border rounded-lg text-foreground text-[11px] cursor-pointer ${className}`}
-        title={title}
+        disabled={disabled}
+        className={`flex items-center gap-1 px-2 h-8 bg-secondary border border-border rounded-lg text-foreground text-[11px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+        data-tooltip={title}
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -83,7 +86,7 @@ export function Dropdown<T>({
         <ChevronDown className="w-2.5 h-2.5 text-muted-foreground shrink-0 ml-auto" />
       </button>
 
-      {open && (
+      {open && !disabled && (
         <div
           className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 z-50 text-foreground ${menuClassName}`}
           role="listbox"
@@ -101,7 +104,7 @@ export function Dropdown<T>({
                     setOpen(false);
                     onChange(option.value);
                   }}
-                  title={option.description}
+                  data-tooltip={option.description}
                   className={`w-full px-3 py-1 flex items-center justify-between gap-2 hover:bg-accent text-left text-xs ${optionClassName}`}
                 >
                   <span className="flex items-center gap-2 min-w-0">

@@ -62,7 +62,8 @@ export const PasteSvgModal: React.FC<PasteSvgModalProps> = ({ isOpen, onClose, o
           <button
             onClick={onClose}
             className="p-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            title="Cerrar (Esc)"
+            data-tooltip="Cerrar"
+            data-shortcut="Esc"
           >
             <X className="w-4 h-4" />
           </button>

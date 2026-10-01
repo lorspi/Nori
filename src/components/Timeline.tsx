@@ -5,6 +5,7 @@ import {
   SkipBack,
   SkipForward,
   CaretRight as ChevronRight,
+  CaretLeft as ChevronLeft,
   CaretDown as ChevronDown,
   Eye,
   EyeSlash as EyeOff,
@@ -48,6 +49,7 @@ interface TimelineProps {
   onCopyKeyframes: (refs: KeyframeRef[]) => void;
   onCopyLayerAnimation: (layerId: string) => void;
   onPaste: (layerId: string) => void;
+  onSeekKeyframe: (direction: -1 | 1) => void;
 }
 
 // Resizable timeline height (remembered per browser)
@@ -120,6 +122,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   onCopyKeyframes,
   onCopyLayerAnimation,
   onPaste,
+  onSeekKeyframe,
 }) => {
   const timelineRootRef = useRef<HTMLElement>(null);
   const tracksContainerRef = useRef<HTMLDivElement>(null);
@@ -548,7 +551,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             // ignore
           }
         }}
-        title="Arrastrar para cambiar la altura de la línea del tiempo (doble clic para restablecer)"
+        data-tooltip={"Arrastra para cambiar la altura de la línea del tiempo\nDoble clic para restablecerla"}
         className={`absolute -top-1 left-0 right-0 h-2 z-40 cursor-row-resize transition-colors ${
           isResizing ? 'bg-bento-blue/50' : 'hover:bg-bento-blue/30'
         }`}
@@ -561,35 +564,58 @@ export const Timeline: React.FC<TimelineProps> = ({
           <button
             onClick={() => onSeek(0)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            title="Ir al inicio (Home)"
+            data-tooltip="Ir al inicio"
+            data-shortcut="Shift+F"
           >
             <SkipBack className="w-3.5 h-3.5" />
           </button>
           <button
+            onClick={() => onSeekKeyframe(-1)}
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex items-center"
+            data-tooltip="Ir al fotograma clave anterior"
+            data-shortcut="Ctrl+F"
+          >
+            <ChevronLeft weight="bold" className="w-2.5 h-2.5 -mr-0.5" />
+            <Diamond className="w-3 h-3" />
+          </button>
+          <button
             onClick={() => stepFrame(false)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            title="Fotograma anterior (←)"
+            data-tooltip="Fotograma anterior"
+            data-shortcut="F"
           >
-            <span className="font-mono text-xs">‹</span>
+            <ChevronLeft className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={onTogglePlay}
             className="p-1.5 rounded-md bg-bento-blue text-white hover:bg-bento-blue/90 transition-colors shadow-sm"
-            title="Reproducir / Pausar (Espacio)"
+            data-tooltip={isPlaying ? 'Pausar' : 'Reproducir'}
+            data-shortcut="Espacio"
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play weight="fill" className="w-3.5 h-3.5" />}
           </button>
           <button
             onClick={() => stepFrame(true)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            title="Fotograma siguiente (→)"
+            data-tooltip="Fotograma siguiente"
+            data-shortcut="G"
           >
-            <span className="font-mono text-xs">›</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onSeekKeyframe(1)}
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex items-center"
+            data-tooltip="Ir al fotograma clave siguiente"
+            data-shortcut="Ctrl+G"
+          >
+            <Diamond className="w-3 h-3" />
+            <ChevronRight weight="bold" className="w-2.5 h-2.5 -ml-0.5" />
           </button>
           <button
             onClick={() => onSeek(duration)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            title="Ir al final (End)"
+            data-tooltip="Ir al final"
+            data-shortcut="Shift+G"
           >
             <SkipForward className="w-3.5 h-3.5" />
           </button>
@@ -616,7 +642,8 @@ export const Timeline: React.FC<TimelineProps> = ({
             value={pixelsPerSecond}
             onChange={(e) => setPixelsPerSecond(Number(e.target.value))}
             className="w-20 accent-bento-blue h-1 bg-muted rounded-md cursor-pointer"
-            title="Ajustar zoom de la línea de tiempo (o Ctrl + rueda mientras el ratón está dentro)"
+            data-tooltip="Zoom de la línea del tiempo. También con la rueda del ratón y"
+            data-shortcut="Ctrl"
           />
           <span className="text-[9px] font-mono text-muted-foreground w-8 text-right">
             {Math.round((pixelsPerSecond / 140) * 100)}%
@@ -696,7 +723,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                         className={`p-0.5 text-muted-foreground hover:text-foreground ${
                           layer.tracks.length === 0 ? 'invisible' : ''
                         }`}
-                        title="Mostrar parámetros animados"
+                        data-tooltip="Mostrar parámetros animados"
                       >
                         {layer.expanded ? (
                           <ChevronDown className="w-3 h-3" />
@@ -770,7 +797,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                     ? 'text-bento-blue'
                                     : 'text-muted-foreground/50 hover:text-foreground'
                                 }`}
-                                title={
+                                data-tooltip={
                                   hasKeyframeAtCurrent
                                     ? 'Quitar fotograma clave en el tiempo actual'
                                     : 'Añadir fotograma clave en el tiempo actual'
@@ -842,7 +869,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                           }`}
                           onMouseDown={(e) => handleLayerBarMouseDown(e, layer.id)}
                           onContextMenu={(e) => handleBarContextMenu(e, layer.id)}
-                          title="Arrastrar para mover todos los fotogramas clave de la capa (clic derecho para copiar / pegar)"
+                          data-tooltip={"Arrastra para mover todos los fotogramas clave de la capa\nClic derecho para copiar o pegar"}
                         >
                           {/* Keyframe summary marks */}
                           {getLayerKeyframeTimes(layer).map((t) => (
@@ -909,7 +936,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                     ? 'bg-white border-2 border-bento-blue shadow-md shadow-bento-blue/50'
                                     : 'bg-bento-blue border border-white'
                                 }`}
-                                title={`Tiempo: ${kf.time.toFixed(2)}s | Valor: ${String(kf.value).length > 32 ? `${String(kf.value).slice(0, 32)}…` : kf.value}\nArrastrar para mover · Shift/Ctrl + clic para selección múltiple · Doble clic para borrar`}
+                                data-tooltip={`Tiempo: ${kf.time.toFixed(2)}s | Valor: ${String(kf.value).length > 32 ? `${String(kf.value).slice(0, 32)}…` : kf.value}\nArrastrar para mover · Shift o Ctrl + clic para selección múltiple · Doble clic para borrar`}
                               />
                             );
                           })}

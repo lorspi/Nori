@@ -104,7 +104,8 @@ export default function AboutNori({ isOpen, onClose }: AboutNoriProps) {
         <button
           onClick={onClose}
           className="w-8 h-8 rounded-lg bg-card border border-border shadow-card flex items-center justify-center text-foreground hover:bg-accent transition-all duration-300 ease-out cursor-pointer"
-          title="Volver al editor (Esc)"
+          data-tooltip="Volver al editor"
+          data-shortcut="Esc"
           aria-label="Cerrar"
         >
           <X className="w-4 h-4" />

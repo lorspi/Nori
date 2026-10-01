@@ -13,12 +13,13 @@ import {
   PencilSimple,
   Polygon as PolygonIcon,
 } from '@phosphor-icons/react';
-import { ColorSwatch, isNoColor } from './ColorSwatch';
+import { ColorSwatch, isNoColor, useUndoSession } from './ColorSwatch';
 import { DEFAULT_SHAPE } from '../utils/pathGeometry';
 import { Layer, Project, EasingConfig, AnimatableProperty, KeyframeRef } from '../types/animation';
 import { ScrubLabel } from './ScrubLabel';
 import { getLayerPropertiesAtTime } from '../utils/interpolator';
 import { CurveEditor } from './CurveEditor';
+import { Dropdown } from './Dropdown';
 import {
   PROPERTY_META,
   createDefaultEasing,
@@ -81,7 +82,7 @@ const LayerNameInput: React.FC<{ name: string; onRename: (name: string) => void 
       }}
       maxLength={80}
       spellCheck={false}
-      title="Clic para renombrar la capa"
+      data-tooltip="Clic para renombrar la capa"
       aria-label="Nombre de la capa"
       className="w-full min-w-0 bg-transparent border-0 font-semibold text-foreground hover:bg-accent focus:bg-secondary px-1.5 py-0.5 -ml-1.5 rounded-md focus:outline-none transition-colors focus:ring-1 focus:ring-ring truncate"
     />
@@ -109,6 +110,8 @@ export const Inspector: React.FC<InspectorProps> = ({
   const [aspectLocked, setAspectLocked] = useState(true);
   // Last color of each removed fill / stroke, restored when it's added back
   const lastColors = useRef<Record<string, string>>({});
+  // Typing a hex color is one undo step per visit to the field
+  const typingSession = useUndoSession();
 
   // The curve editor works on the selected keyframes only (never on an implicit fallback),
   // showing the first one's curve and applying edits to all of them
@@ -217,15 +220,15 @@ export const Inspector: React.FC<InspectorProps> = ({
             </div>
             <div>
               <label className="text-muted-foreground block mb-1">FPS</label>
-              <select
+              <Dropdown
                 value={project.fps}
-                onChange={(e) => onUpdateProjectSettings({ fps: Number(e.target.value) })}
-                className="w-full bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
-              >
-                <option value={24}>24 fps</option>
-                <option value={30}>30 fps</option>
-                <option value={60}>60 fps</option>
-              </select>
+                options={[24, 30, 60].map((fps) => ({ value: fps, label: `${fps} fps` }))}
+                onChange={(fps) => onUpdateProjectSettings({ fps })}
+                align="left"
+                className="w-full font-mono"
+                menuClassName="w-full"
+                ariaLabel="FPS"
+              />
             </div>
           </div>
 
@@ -234,13 +237,14 @@ export const Inspector: React.FC<InspectorProps> = ({
             <div className="flex items-center gap-2">
               <ColorSwatch
                 value={project.backgroundColor}
-                onChange={(color) => onUpdateProjectSettings({ backgroundColor: color })}
+                onChange={(color, recordUndo) => onUpdateProjectSettings({ backgroundColor: color }, recordUndo)}
                 title="Color de fondo"
               />
               <input
                 type="text"
                 value={project.backgroundColor}
-                onChange={(e) => onUpdateProjectSettings({ backgroundColor: e.target.value })}
+                onFocus={typingSession.begin}
+                onChange={(e) => onUpdateProjectSettings({ backgroundColor: e.target.value }, typingSession.take())}
                 className="flex-1 bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
               />
             </div>
@@ -284,7 +288,7 @@ export const Inspector: React.FC<InspectorProps> = ({
         className={`p-0.5 rounded transition-colors ${
           isAnimated ? 'text-bento-blue hover:text-bento-blue/80' : 'text-muted-foreground/50 hover:text-foreground'
         }`}
-        title={isAnimated ? `Desactivar animación de ${label}` : `Activar animación de ${label}`}
+        data-tooltip={isAnimated ? `Desactivar animación de ${label}` : `Activar animación de ${label}`}
       >
         <Diamond className="w-3 h-3" weight={isAnimated && hasKeyAtCurrent ? 'fill' : isAnimated ? 'bold' : 'regular'} />
       </button>
@@ -297,11 +301,11 @@ export const Inspector: React.FC<InspectorProps> = ({
     const value = p[prop];
     const none = isNoColor(value);
     const key = `${layerId}:${prop}`;
-    const setColor = (color: string) => {
+    const setColor = (color: string, recordUndo = true) => {
       const changes: Partial<Layer['properties']> = { [prop]: color };
       // A stroke that is added back needs a visible width
       if (prop === 'stroke' && !isNoColor(color) && !(p.strokeWidth > 0)) changes.strokeWidth = 2;
-      onUpdateLayerProperties(fillTargets, changes);
+      onUpdateLayerProperties(fillTargets, changes, recordUndo);
     };
     return (
       <div className="flex items-center gap-1.5">
@@ -310,7 +314,8 @@ export const Inspector: React.FC<InspectorProps> = ({
           type="text"
           value={none ? '' : value}
           placeholder={emptyLabel}
-          onChange={(e) => setColor(e.target.value.trim() || 'transparent')}
+          onFocus={typingSession.begin}
+          onChange={(e) => setColor(e.target.value.trim() || 'transparent', typingSession.take())}
           className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground placeholder:text-muted-foreground"
         />
         <button
@@ -324,7 +329,7 @@ export const Inspector: React.FC<InspectorProps> = ({
             }
           }}
           className="p-1.5 rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
-          title={none ? (prop === 'fill' ? 'Añadir relleno' : 'Añadir trazo') : prop === 'fill' ? 'Quitar relleno' : 'Quitar trazo'}
+          data-tooltip={none ? (prop === 'fill' ? 'Añadir relleno' : 'Añadir trazo') : prop === 'fill' ? 'Quitar relleno' : 'Quitar trazo'}
         >
           {none ? <Plus className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
         </button>
@@ -355,7 +360,7 @@ export const Inspector: React.FC<InspectorProps> = ({
       return toValue(next);
     };
     return (
-      <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1" title={title}>
+      <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1" data-tooltip={title}>
         <ScrubLabel
           value={shown}
           step={step}
@@ -396,14 +401,14 @@ export const Inspector: React.FC<InspectorProps> = ({
             <button
               onClick={() => onDuplicateLayer(selectedLayer.id)}
               className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent"
-              title="Duplicar capa"
+              data-tooltip="Duplicar capa"
             >
               <Copy className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => onDeleteLayer(selectedLayer.id)}
               className="p-1 text-muted-foreground hover:text-destructive rounded-md hover:bg-accent"
-              title="Eliminar capa"
+              data-tooltip="Eliminar capa"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -506,7 +511,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   value={Math.round(p.x)}
                   onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'x', Number(e.target.value))}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                  title="Posición X"
+                  data-tooltip="Posición X"
                 />
               </div>
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
@@ -523,7 +528,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   value={Math.round(p.y)}
                   onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'y', Number(e.target.value))}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                  title="Posición Y"
+                  data-tooltip="Posición Y"
                 />
               </div>
             </div>
@@ -541,7 +546,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   type="button"
                   onClick={() => onUpdateLayerProperties(layerId, { anchorX: 0, anchorY: 0 })}
                   className="text-[9px] text-bento-blue hover:text-bento-blue/80 font-mono hover:underline"
-                  title="Centrar punto de anclaje (0, 0)"
+                  data-tooltip="Centrar punto de anclaje (0, 0)"
                 >
                   Centrar (0, 0)
                 </button>
@@ -563,7 +568,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   value={Math.round(p.anchorX || 0)}
                   onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'anchorX', Number(e.target.value))}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                  title="Punto de anclaje X (horizontal)"
+                  data-tooltip="Punto de anclaje X (horizontal)"
                 />
               </div>
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
@@ -580,7 +585,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   value={Math.round(p.anchorY || 0)}
                   onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'anchorY', Number(e.target.value))}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                  title="Punto de anclaje Y (vertical)"
+                  data-tooltip="Punto de anclaje Y (vertical)"
                 />
               </div>
             </div>
@@ -617,7 +622,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   ? 'bg-bento-blue/10 border-bento-blue/40 text-bento-blue'
                   : 'bg-secondary border-border text-muted-foreground'
               }`}
-              title="Vincular proporción"
+              data-tooltip="Vincular proporción"
             >
               {aspectLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
             </button>
@@ -810,16 +815,20 @@ export const Inspector: React.FC<InspectorProps> = ({
               </div>
               <div>
                 <span className="text-muted-foreground block mb-0.5 text-[10px]">Grosor</span>
-                <select
-                  value={p.fontWeight || '700'}
-                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'fontWeight', e.target.value)}
-                  className="w-full bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
-                >
-                  <option value="400">Regular (400)</option>
-                  <option value="600">Semibold (600)</option>
-                  <option value="700">Bold (700)</option>
-                  <option value="800">Black (800)</option>
-                </select>
+                <Dropdown
+                  value={String(p.fontWeight || '700')}
+                  options={[
+                    { value: '400', label: 'Regular (400)' },
+                    { value: '600', label: 'Semibold (600)' },
+                    { value: '700', label: 'Bold (700)' },
+                    { value: '800', label: 'Black (800)' },
+                  ]}
+                  onChange={(weight) => onUpdateLayerProperty(selectedLayer.id, 'fontWeight', weight)}
+                  align="left"
+                  className="w-full font-mono"
+                  menuClassName="w-full"
+                  ariaLabel="Grosor"
+                />
               </div>
             </div>
           </div>
@@ -870,7 +879,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 value={Number((p.strokeWidth || 0).toFixed(2))}
                 onChange={(e) => onUpdateLayerProperty(fillTargets, 'strokeWidth', Math.max(0, Number(e.target.value)))}
                 className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                title="Grosor del trazo"
+                data-tooltip="Grosor del trazo"
               />
               <span className="text-muted-foreground font-mono text-[10px]">px</span>
             </div>

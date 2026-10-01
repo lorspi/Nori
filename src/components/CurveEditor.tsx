@@ -452,7 +452,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
           type="button"
           onClick={() => (isPreviewRunning ? stopPreview() : setPreviewRun((n) => n + 1))}
           className="absolute top-2 right-2 p-1 rounded-md bg-card border border-border hover:bg-accent text-foreground transition-colors flex items-center gap-1 text-[10px]"
-          title={`Previsualizar la animación (${previewDuration.toFixed(2)}s)`}
+          data-tooltip={`Previsualizar la animación (${previewDuration.toFixed(2)}s)`}
         >
           {isPreviewRunning ? (
             <Stop className="w-2.5 h-2.5 text-bento-green" weight="fill" />
@@ -487,7 +487,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
             {renderBezierField('x2', 'X2')}
             {renderBezierField('y2', 'Y2')}
           </div>
-          <p className="text-[10px] text-muted-foreground truncate select-text" title="Equivalente en CSS">
+          <p className="text-[10px] text-muted-foreground truncate select-text" data-tooltip="Equivalente en CSS">
             cubic-bezier({fmt(bezier.x1)}, {fmt(bezier.y1)}, {fmt(bezier.x2)}, {fmt(bezier.y2)})
           </p>
         </div>

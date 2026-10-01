@@ -34,6 +34,17 @@ import {
   serializePath,
 } from '../utils/pathGeometry';
 import { ToolMode } from './TopBar';
+import { X, Question } from '@phosphor-icons/react';
+
+// Whether the canvas shortcuts help is shown (remembered per browser)
+const HELP_STORAGE_KEY = 'nori-canvas-help-open';
+const readHelpOpen = () => {
+  try {
+    return localStorage.getItem(HELP_STORAGE_KEY) !== '0';
+  } catch {
+    return true;
+  }
+};
 
 interface CanvasViewProps {
   project: Project;
@@ -232,6 +243,15 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
   };
 
   const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(readHelpOpen);
+  const toggleHelp = (open: boolean) => {
+    setIsHelpOpen(open);
+    try {
+      localStorage.setItem(HELP_STORAGE_KEY, open ? '1' : '0');
+    } catch {
+      // Storage unavailable: the choice just isn't remembered
+    }
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -759,14 +779,39 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
         />
       )}
 
-      {/* Quick Navigation Overlay Help (Bottom-Left) */}
-      <div className="absolute bottom-3 left-3 bg-card/90 border border-border rounded-lg px-2.5 py-1 text-[10px] text-muted-foreground backdrop-blur-sm pointer-events-none flex items-center gap-2 font-mono">
-        <span>Espacio + Arrastrar: Desplazar</span>
-        <span>·</span>
-        <span>Ctrl + Rueda: Zoom</span>
-        <span>·</span>
-        <span>Shift + Clic: Selección múltiple</span>
-      </div>
+      {/* Quick Navigation Overlay Help (Bottom-Left): closes with X, reopens with ? */}
+      {isHelpOpen ? (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          className="absolute bottom-3 left-3 bg-card/90 border border-border rounded-lg pl-2.5 pr-1 py-1 text-[10px] text-muted-foreground backdrop-blur-sm flex items-center gap-2 font-mono animate-tooltip-in"
+        >
+          <span>Espacio + Arrastrar: Desplazar</span>
+          <span>·</span>
+          <span>Ctrl + Rueda: Zoom</span>
+          <span>·</span>
+          <span>Shift + Clic: Selección múltiple</span>
+          <button
+            type="button"
+            onClick={() => toggleHelp(false)}
+            className="p-0.5 rounded hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
+            data-tooltip="Ocultar ayuda"
+            aria-label="Ocultar ayuda"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => toggleHelp(true)}
+          className="absolute bottom-3 left-3 w-6 h-6 rounded-lg bg-card/90 border border-border backdrop-blur-sm flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer animate-tooltip-in"
+          data-tooltip="Mostrar atajos del lienzo"
+          aria-label="Mostrar atajos del lienzo"
+        >
+          <Question className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 };
