@@ -26,15 +26,46 @@ import {
   worldToLayerLocal,
 } from '../utils/transformHandles';
 import {
+  HandleSide,
+  MirrorMode,
   PathSegment,
+  addVertexCurves,
   getLinkedSegments,
   getPathVertices,
+  getVertexMirroring,
+  getVisibleHandles,
+  moveHandle,
   moveVertices,
   parsePath,
+  removeVertexCurves,
   serializePath,
+  setVertexMirroring,
 } from '../utils/pathGeometry';
 import { ToolMode } from './TopBar';
-import { X, Question } from '@phosphor-icons/react';
+import { X, Question, BezierCurve, LineSegment } from '@phosphor-icons/react';
+
+// Icons of the mirroring options: a vertex with its two handles
+const MirrorIcon: React.FC<{ mode: MirrorMode }> = ({ mode }) => {
+  // Same handle on the left; the right one is bent, shorter or an exact reflection
+  const a = { x: 2.5, y: 10.5 };
+  const v = { x: 8, y: 8 };
+  const b = mode === 'none' ? { x: 13.5, y: 11.5 } : mode === 'angle' ? { x: 10.75, y: 6.75 } : { x: 13.5, y: 5.5 };
+  const diamond = (p: { x: number; y: number }) => `M${p.x} ${p.y - 1.8}L${p.x + 1.8} ${p.y}L${p.x} ${p.y + 1.8}L${p.x - 1.8} ${p.y}Z`;
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.1">
+      <path d={`M${a.x} ${a.y}L${v.x} ${v.y}L${b.x} ${b.y}`} />
+      <path d={diamond(a)} />
+      <path d={diamond(b)} />
+      <circle cx={v.x} cy={v.y} r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+};
+
+const MIRROR_OPTIONS: { mode: MirrorMode; label: string }[] = [
+  { mode: 'none', label: 'Sin reflejo' },
+  { mode: 'angle', label: 'Reflejar ángulo' },
+  { mode: 'angleLength', label: 'Reflejar ángulo y longitud' },
+];
 
 // Whether the canvas shortcuts help is shown (remembered per browser)
 const HELP_STORAGE_KEY = 'nori-canvas-help-open';
@@ -80,6 +111,17 @@ type Drag =
   | { kind: 'groupRotate'; members: GroupMember[]; box: Box; startMouse: Point }
   | { kind: 'marquee'; start: Point; current: Point; base: string[] }
   | { kind: 'vertex'; layerId: string; segments: PathSegment[]; indices: number[]; start: LayerProperties; startLocal: Point }
+  // Bézier handle of a vertex; brokeMirror = Alt was held, so the handles stop mirroring
+  | {
+      kind: 'handle';
+      layerId: string;
+      segments: PathSegment[];
+      vertex: number;
+      side: HandleSide;
+      start: LayerProperties;
+      mode: MirrorMode;
+      brokeMirror: boolean;
+    }
   // Box selection of vertices; onLayer = it started over the edited shape
   | { kind: 'vertexMarquee'; start: Point; current: Point; base: number[]; onLayer: boolean };
 
@@ -120,11 +162,17 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
   // Vertex under the cursor and selected vertices (segment indices) while editing vertices
   const [hoverVertex, setHoverVertex] = useState<number | null>(null);
   const [selectedVertices, setSelectedVertices] = useState<number[]>([]);
+  // Bézier handle under the cursor ("vertex:in" / "vertex:out")
+  const [hoverHandle, setHoverHandle] = useState<string | null>(null);
+  // Mirroring chosen for a vertex; without one it is read from how its handles sit
+  const [mirrorOverrides, setMirrorOverrides] = useState<Record<number, MirrorMode>>({});
 
   // A new vertex editing session starts with nothing selected
   useEffect(() => {
     setSelectedVertices([]);
     setHoverVertex(null);
+    setHoverHandle(null);
+    setMirrorOverrides({});
   }, [vertexEditLayerId]);
 
   // Render canvas whenever inputs change with full device pixel ratio
@@ -160,10 +208,23 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       vertexEditLayerId,
       selectedVertices,
       hoverVertex,
+      hoverHandle: drag?.kind === 'handle' ? `${drag.vertex}:${drag.side}` : hoverHandle,
     });
 
     ctx.restore();
-  }, [project, currentTime, showCheckerboard, selectedLayerId, selectedLayerIds, zoom, vertexEditLayerId, hoverVertex, selectedVertices]);
+  }, [
+    project,
+    currentTime,
+    showCheckerboard,
+    selectedLayerId,
+    selectedLayerIds,
+    zoom,
+    vertexEditLayerId,
+    hoverVertex,
+    selectedVertices,
+    hoverHandle,
+    drag,
+  ]);
 
   useEffect(() => {
     render();
@@ -384,6 +445,102 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     ...new Set(vertices.filter((i) => segments[i]).flatMap((i) => getLinkedSegments(segments, i))),
   ];
 
+  // Selected vertex as listed on the canvas (a shape's closing point counts as its start)
+  const isVertexSelected = (segments: PathSegment[], vertex: number) =>
+    getLinkedSegments(segments, vertex).some((i) => selectedVertices.includes(i));
+
+  // Bézier handle of a selected vertex under the point, with its distance
+  const hitTestBezierHandle = (pt: Point) => {
+    const layer = getVertexLayer();
+    if (!layer || selectedVertices.length === 0) return null;
+    const props = getLayerPropertiesAtTime(layer, currentTime);
+    if (!props.pathData) return null;
+    const segments = parsePath(props.pathData);
+    const radius = 7 / zoom;
+    let best: { layer: Layer; props: LayerProperties; vertex: number; side: HandleSide; dist: number } | null = null;
+    for (const v of getPathVertices(segments)) {
+      if (!isVertexSelected(segments, v.segment)) continue;
+      for (const h of getVisibleHandles(segments, v.segment)) {
+        const w = layerLocalToWorld(props, h.x, h.y);
+        const d = Math.hypot(pt.x - w.x, pt.y - w.y);
+        if (d <= radius && (!best || d < best.dist)) best = { layer, props, vertex: v.segment, side: h.side, dist: d };
+      }
+    }
+    return best;
+  };
+
+  const getMirrorMode = (segments: PathSegment[], vertex: number): MirrorMode =>
+    mirrorOverrides[vertex] ?? getVertexMirroring(segments, vertex);
+
+  // Edits the path of the vertex-edited layer as one undo step
+  const editVertexPath = (edit: (segments: PathSegment[]) => PathSegment[]) => {
+    const layer = getVertexLayer();
+    if (!layer) return;
+    const props = getLayerPropertiesAtTime(layer, currentTime);
+    if (!props.pathData) return;
+    const next = serializePath(edit(parsePath(props.pathData)));
+    if (next === props.pathData) return;
+    onStartDragLayer?.();
+    onUpdateLayerProperties(layer.id, { pathData: next }, false);
+  };
+
+  // Curves (smooth, mirrored handles) on the given vertices
+  const addCurves = (vertices: number[]) => {
+    if (vertices.length === 0) return;
+    let remap = (i: number) => i;
+    editVertexPath((segments) => {
+      const result = addVertexCurves(segments, vertices);
+      remap = result.remap;
+      return result.segments;
+    });
+    // Writing out a shape's closing line can shift the indices of later segments
+    setSelectedVertices((prev) => prev.map(remap));
+    setMirrorOverrides((prev) => {
+      const next: Record<number, MirrorMode> = {};
+      Object.entries(prev).forEach(([k, mode]) => {
+        if (!vertices.includes(Number(k))) next[remap(Number(k))] = mode;
+      });
+      return next;
+    });
+  };
+
+  const removeCurves = (vertices: number[]) => {
+    if (vertices.length === 0) return;
+    editVertexPath((segments) => removeVertexCurves(segments, vertices));
+    setMirrorOverrides((prev) => {
+      const next = { ...prev };
+      vertices.forEach((v) => delete next[v]);
+      return next;
+    });
+  };
+
+  const applyMirroring = (mode: MirrorMode) => {
+    if (selectedVertices.length === 0) return;
+    editVertexPath((segments) => setVertexMirroring(segments, selectedVertices, mode));
+    setMirrorOverrides((prev) => {
+      const next = { ...prev };
+      selectedVertices.forEach((v) => (next[v] = mode));
+      return next;
+    });
+  };
+
+  // State of the vertex toolbar for the current selection
+  const vertexToolbar = (() => {
+    const layer = getVertexLayer();
+    if (!layer) return null;
+    const props = getLayerPropertiesAtTime(layer, currentTime);
+    if (!props.pathData) return null;
+    const segments = parsePath(props.pathData);
+    const vertices = selectedVertices.filter((i) => segments[i] && segments[i].cmd !== 'Z');
+    const modes = [...new Set(vertices.map((v) => getMirrorMode(segments, v)))];
+    return {
+      vertices,
+      canAdd: vertices.length > 0 && serializePath(addVertexCurves(segments, vertices).segments) !== props.pathData,
+      canRemove: vertices.some((v) => getVisibleHandles(segments, v).length > 0),
+      mode: modes.length === 1 ? modes[0] : null,
+    };
+  })();
+
   // Arrow keys nudge the selected vertices 1 px (Shift: 10 px) on the canvas
   useEffect(() => {
     if (!vertexEditLayerId || selectedVertices.length === 0) return;
@@ -443,6 +600,30 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     // leaves the mode.
     if (vertexEditLayerId && getVertexLayer()) {
       const vertexHit = hitTestVertex(pt);
+      // Handles of the selected vertices win over a vertex that is farther from the cursor
+      const handleHit = hitTestBezierHandle(pt);
+      if (handleHit) {
+        const vertexPt = vertexHit
+          ? getPathVertices(parsePath(vertexHit.props.pathData!)).find((v) => v.segment === vertexHit.segment)
+          : null;
+        const vertexWorld = vertexPt ? layerLocalToWorld(vertexHit!.props, vertexPt.x, vertexPt.y) : null;
+        const vertexDist = vertexWorld ? Math.hypot(pt.x - vertexWorld.x, pt.y - vertexWorld.y) : Infinity;
+        if (handleHit.dist < vertexDist) {
+          const segments = parsePath(handleHit.props.pathData!);
+          // Alt drags the handle on its own and the vertex stops mirroring
+          setDrag({
+            kind: 'handle',
+            layerId: handleHit.layer.id,
+            segments,
+            vertex: handleHit.vertex,
+            side: handleHit.side,
+            start: handleHit.props,
+            mode: getMirrorMode(segments, handleHit.vertex),
+            brokeMirror: false,
+          });
+          return;
+        }
+      }
       if (vertexHit) {
         const isSelected = selectedVertices.includes(vertexHit.segment);
         if (additive && isSelected) {
@@ -558,6 +739,14 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           onUpdateLayerProperties(d.layerId, { pathData: serializePath(moved) }, false);
           break;
         }
+        case 'handle': {
+          if (e.altKey) d.brokeMirror = true;
+          const local = worldToLayerLocal(d.start, pt.x, pt.y);
+          const moved = moveHandle(d.segments, d.vertex, d.side, local.x, local.y, d.brokeMirror ? 'none' : d.mode);
+          recordOnce();
+          onUpdateLayerProperties(d.layerId, { pathData: serializePath(moved) }, false);
+          break;
+        }
         case 'vertexMarquee': {
           const hits = getVerticesInBox({
             minX: Math.min(d.start.x, pt.x),
@@ -651,6 +840,9 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       ) {
         onExitVertexEdit();
       }
+      if (d?.kind === 'handle' && d.brokeMirror) {
+        setMirrorOverrides((prev) => ({ ...prev, [d.vertex]: 'none' }));
+      }
       setDrag(null);
       hasRecordedDragRef.current = false;
     };
@@ -670,13 +862,18 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       return;
     }
     if (vertexEditLayerId) {
-      const segment = hitTestVertex(clientToCanvas(e.clientX, e.clientY))?.segment ?? null;
+      const pt = clientToCanvas(e.clientX, e.clientY);
+      const handle = hitTestBezierHandle(pt);
+      const segment = handle ? null : (hitTestVertex(pt)?.segment ?? null);
+      const handleKey = handle ? `${handle.vertex}:${handle.side}` : null;
       if (segment !== hoverVertex) setHoverVertex(segment);
-      const next = segment !== null ? 'move' : null;
+      if (handleKey !== hoverHandle) setHoverHandle(handleKey);
+      const next = segment !== null || handle ? 'move' : null;
       if (next !== hoverCursor) setHoverCursor(next);
       return;
     }
     if (hoverVertex !== null) setHoverVertex(null);
+    if (hoverHandle !== null) setHoverHandle(null);
     const hit = hitTestSelection(getSelectionMembers(), clientToCanvas(e.clientX, e.clientY));
     const next = hit?.cursor ?? null;
     if (next !== hoverCursor) setHoverCursor(next);
@@ -696,6 +893,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       case 'anchor':
         return 'crosshair';
       case 'vertex':
+      case 'handle':
         return 'move';
       case 'move':
         return 'default';
@@ -720,10 +918,18 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onDoubleClick={(e) => {
-        // Double click on a path (or the edited one) toggles vertex editing
+        // Double click on a path (or the edited one) toggles vertex editing; on a vertex it
+        // turns it into a curve or back into a corner
         if (activeTool !== 'select' || e.button !== 0) return;
         const pt = clientToCanvas(e.clientX, e.clientY);
-        if (hitTestVertex(pt)) return;
+        if (hitTestBezierHandle(pt)) return;
+        const vertexHit = hitTestVertex(pt);
+        if (vertexHit) {
+          const segments = parsePath(vertexHit.props.pathData!);
+          if (getVisibleHandles(segments, vertexHit.segment).length > 0) removeCurves([vertexHit.segment]);
+          else addCurves([vertexHit.segment]);
+          return;
+        }
         const hit = hitTestLayer(pt);
         if (hit?.type === 'path') onToggleVertexEdit(hit.id);
       }}
@@ -789,6 +995,58 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           style={marquee}
           className="absolute border border-bento-blue bg-bento-blue/10 rounded-sm pointer-events-none"
         />
+      )}
+
+      {/* Vertex editing tools: Bézier curves and how their handles mirror */}
+      {vertexToolbar && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.stopPropagation()}
+          className="absolute top-3 left-1/2 -translate-x-1/2 bg-card/90 border border-border rounded-lg p-1 backdrop-blur-sm flex items-center gap-1 text-[11px] text-muted-foreground shadow-card animate-tooltip-in"
+        >
+          <button
+            type="button"
+            disabled={!vertexToolbar.canAdd}
+            onClick={() => addCurves(vertexToolbar.vertices)}
+            className="flex items-center gap-1.5 h-7 px-2 rounded-md text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent"
+            data-tooltip={'Añade tiradores Bézier a los vértices seleccionados\nTambién con doble clic en un vértice'}
+          >
+            <BezierCurve className="w-3.5 h-3.5" />
+            <span>Agregar curva</span>
+          </button>
+          <button
+            type="button"
+            disabled={!vertexToolbar.canRemove}
+            onClick={() => removeCurves(vertexToolbar.vertices)}
+            className="flex items-center gap-1.5 h-7 px-2 rounded-md text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent"
+            data-tooltip={'Quita los tiradores Bézier: los vértices vuelven a ser esquinas\nTambién con doble clic en un vértice curvo'}
+          >
+            <LineSegment className="w-3.5 h-3.5" />
+            <span>Quitar curva</span>
+          </button>
+          <div className="w-px h-5 bg-border mx-1" />
+          <span className="pl-1 pr-0.5">Reflejo</span>
+          <div className="flex items-center bg-secondary rounded-md p-0.5 gap-0.5">
+            {MIRROR_OPTIONS.map((o) => (
+              <button
+                key={o.mode}
+                type="button"
+                disabled={vertexToolbar.vertices.length === 0}
+                onClick={() => applyMirroring(o.mode)}
+                className={`w-8 h-6 flex items-center justify-center rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default ${
+                  vertexToolbar.mode === o.mode && vertexToolbar.vertices.length > 0
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                data-tooltip={o.mode === 'none' ? `${o.label}\nAlt + arrastrar un tirador lo mueve por separado` : o.label}
+                aria-label={o.label}
+              >
+                <MirrorIcon mode={o.mode} />
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Quick Navigation Overlay Help (Bottom-Left): closes with X, reopens with ? */}

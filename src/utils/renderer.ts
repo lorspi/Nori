@@ -9,7 +9,7 @@ import {
   getSelectionOutline,
   layerLocalToWorld,
 } from './transformHandles';
-import { getLinkedSegments, getPathVertices, getShapePathData, parsePath } from './pathGeometry';
+import { getLinkedSegments, getPathVertices, getShapePathData, getVisibleHandles, parsePath } from './pathGeometry';
 
 export interface RenderOptions {
   scale?: number;
@@ -26,6 +26,8 @@ export interface RenderOptions {
   // Selected vertices and the one under the cursor (segment indices)
   selectedVertices?: number[];
   hoverVertex?: number | null;
+  // Bézier handle under the cursor or being dragged ("vertex:in" / "vertex:out")
+  hoverHandle?: string | null;
 }
 
 /**
@@ -223,7 +225,15 @@ export function renderProjectFrame(
     ? project.layers.find((l) => l.id === options.vertexEditLayerId)
     : undefined;
   if (vertexLayer && isShown(vertexLayer)) {
-    drawVertexEditor(ctx, vertexLayer, currentTime, options.zoom || 1, options.selectedVertices ?? [], options.hoverVertex ?? null);
+    drawVertexEditor(
+      ctx,
+      vertexLayer,
+      currentTime,
+      options.zoom || 1,
+      options.selectedVertices ?? [],
+      options.hoverVertex ?? null,
+      options.hoverHandle ?? null
+    );
   } else if (multi.length > 1) {
     drawGroupSelection(ctx, multi, currentTime, options.zoom || 1);
   } else if (options.selectedLayerId) {
@@ -554,7 +564,8 @@ function drawSelectionBounds(
 }
 
 /**
- * Vertex editing: thin outline of the path plus a square on every vertex
+ * Vertex editing: thin outline of the path plus a square on every vertex. Selected
+ * vertices show their Bézier handles (a line and a diamond for each).
  */
 function drawVertexEditor(
   ctx: CanvasRenderingContext2D,
@@ -562,7 +573,8 @@ function drawVertexEditor(
   currentTime: number,
   zoom: number,
   selectedVertices: number[],
-  hoverVertex: number | null
+  hoverVertex: number | null,
+  hoverHandle: string | null
 ) {
   const p = getLayerPropertiesAtTime(layer, currentTime);
   if (!p.pathData) return;
@@ -591,8 +603,38 @@ function drawVertexEditor(
   ctx.stroke(getCachedPath2D(p.pathData));
   ctx.restore();
 
-  ctx.lineWidth = 1.5 * invZoom;
+  // Handles of the selected vertices (once per point, even when it closes a shape)
+  const handleVertices = getPathVertices(segments).filter((v) => selected.has(v.segment));
+  ctx.lineWidth = 1 * invZoom;
   ctx.strokeStyle = '#0084ff';
+  for (const v of handleVertices) {
+    const w = layerLocalToWorld(p, v.x, v.y);
+    for (const h of getVisibleHandles(segments, v.segment)) {
+      const hw = layerLocalToWorld(p, h.x, h.y);
+      ctx.beginPath();
+      ctx.moveTo(w.x, w.y);
+      ctx.lineTo(hw.x, hw.y);
+      ctx.stroke();
+    }
+  }
+  ctx.lineWidth = 1.5 * invZoom;
+  for (const v of handleVertices) {
+    for (const h of getVisibleHandles(segments, v.segment)) {
+      const hw = layerLocalToWorld(p, h.x, h.y);
+      const isHovered = hoverHandle === `${v.segment}:${h.side}`;
+      const half = (isHovered ? 4.5 : 3.5) * invZoom;
+      ctx.beginPath();
+      ctx.moveTo(hw.x, hw.y - half);
+      ctx.lineTo(hw.x + half, hw.y);
+      ctx.lineTo(hw.x, hw.y + half);
+      ctx.lineTo(hw.x - half, hw.y);
+      ctx.closePath();
+      ctx.fillStyle = isHovered ? '#0084ff' : '#ffffff';
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
   for (const v of getPathVertices(segments)) {
     const w = layerLocalToWorld(p, v.x, v.y);
     const half = (hovered.has(v.segment) ? 4.5 : 3.5) * invZoom;

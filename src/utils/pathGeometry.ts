@@ -261,10 +261,338 @@ export function moveVertices(segments: PathSegment[], indices: number[], dx: num
   return next;
 }
 
+// ── Bézier handles ───────────────────────────────────────────────────────────
+
+// A control point of a cubic segment: values[index], values[index + 1] (index 0 or 2)
+export interface HandleRef {
+  segment: number;
+  index: number;
+}
+
+export type HandleSide = 'in' | 'out';
+
+// How the two handles of a vertex follow each other: not at all, in opposite directions
+// (each keeps its length) or as an exact reflection (same angle and length)
+export type MirrorMode = 'none' | 'angle' | 'angleLength';
+
+type Pt = { x: number; y: number };
+
+const EPS = 0.01;
+const cloneSegments = (segments: PathSegment[]) => segments.map((s) => ({ cmd: s.cmd, values: [...s.values] }));
+const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+
+const segmentEnd = (segments: PathSegment[], i: number): Pt => {
+  const v = segments[i].values;
+  return { x: v[v.length - 2], y: v[v.length - 1] };
+};
+
+// Point each segment starts from (the end of the previous one, or the subpath start after Z)
+function getStartPoints(segments: PathSegment[]): Pt[] {
+  const out: Pt[] = [];
+  let current: Pt = { x: 0, y: 0 };
+  let subpathStart = current;
+  for (const s of segments) {
+    out.push(current);
+    if (s.cmd === 'Z') {
+      current = subpathStart;
+      continue;
+    }
+    const end = { x: s.values[s.values.length - 2], y: s.values[s.values.length - 1] };
+    if (s.cmd === 'M') subpathStart = end;
+    current = end;
+  }
+  return out;
+}
+
+export const getHandlePoint = (segments: PathSegment[], ref: HandleRef): Pt => ({
+  x: segments[ref.segment].values[ref.index],
+  y: segments[ref.segment].values[ref.index + 1],
+});
+
+const setHandlePoint = (segments: PathSegment[], ref: HandleRef, p: Pt) => {
+  segments[ref.segment].values[ref.index] = p.x;
+  segments[ref.segment].values[ref.index + 1] = p.y;
+};
+
+/**
+ * Handles of a vertex: the incoming one ends the cubic that arrives at the vertex and the
+ * outgoing one starts the cubic that leaves it (a closed shape's start vertex takes its
+ * incoming handle from the segment that closes it).
+ */
+export function getVertexHandles(segments: PathSegment[], vertex: number): { in: HandleRef | null; out: HandleRef | null } {
+  let inRef: HandleRef | null = null;
+  let outRef: HandleRef | null = null;
+  if (!segments[vertex] || segments[vertex].cmd === 'Z') return { in: null, out: null };
+  for (const j of getLinkedSegments(segments, vertex)) {
+    if (!inRef && segments[j].cmd === 'C') inRef = { segment: j, index: 2 };
+    if (!outRef && segments[j + 1]?.cmd === 'C') outRef = { segment: j + 1, index: 0 };
+  }
+  return { in: inRef, out: outRef };
+}
+
+// Handles drawn on the canvas: the ones that don't sit on their vertex
+export function getVisibleHandles(segments: PathSegment[], vertex: number): { side: HandleSide; ref: HandleRef; x: number; y: number }[] {
+  const v = segmentEnd(segments, vertex);
+  const h = getVertexHandles(segments, vertex);
+  const out: { side: HandleSide; ref: HandleRef; x: number; y: number }[] = [];
+  (['in', 'out'] as const).forEach((side) => {
+    const ref = h[side];
+    if (!ref) return;
+    const p = getHandlePoint(segments, ref);
+    if (dist(p, v) > EPS) out.push({ side, ref, ...p });
+  });
+  return out;
+}
+
+// Mirroring the current handles of a vertex follow (none when it has fewer than two)
+export function getVertexMirroring(segments: PathSegment[], vertex: number): MirrorMode {
+  const h = getVertexHandles(segments, vertex);
+  if (!h.in || !h.out) return 'none';
+  const v = segmentEnd(segments, vertex);
+  const a = getHandlePoint(segments, h.in);
+  const b = getHandlePoint(segments, h.out);
+  const la = dist(a, v);
+  const lb = dist(b, v);
+  if (la <= EPS || lb <= EPS) return 'none';
+  const dot = ((a.x - v.x) * (b.x - v.x) + (a.y - v.y) * (b.y - v.y)) / (la * lb);
+  if (dot > -0.9995) return 'none';
+  return Math.abs(la - lb) <= Math.max(0.1, 0.01 * Math.max(la, lb)) ? 'angleLength' : 'angle';
+}
+
+/**
+ * Moves one handle of a vertex to (x, y). With mirroring the opposite handle turns to the
+ * opposite direction ('angle', keeping its length) or becomes its exact reflection.
+ */
+export function moveHandle(
+  segments: PathSegment[],
+  vertex: number,
+  side: HandleSide,
+  x: number,
+  y: number,
+  mode: MirrorMode
+): PathSegment[] {
+  const next = cloneSegments(segments);
+  const h = getVertexHandles(next, vertex);
+  const ref = h[side];
+  if (!ref) return next;
+  setHandlePoint(next, ref, { x, y });
+  const other = h[side === 'in' ? 'out' : 'in'];
+  if (!other || mode === 'none') return next;
+  const v = segmentEnd(next, vertex);
+  const d = { x: x - v.x, y: y - v.y };
+  if (mode === 'angleLength') {
+    setHandlePoint(next, other, { x: v.x - d.x, y: v.y - d.y });
+  } else {
+    const len = Math.hypot(d.x, d.y);
+    const otherLen = dist(getHandlePoint(next, other), v);
+    if (len > EPS && otherLen > EPS) {
+      setHandlePoint(next, other, { x: v.x - (d.x / len) * otherLen, y: v.y - (d.y / len) * otherLen });
+    }
+  }
+  return next;
+}
+
+// Turns a line or quadratic segment into the cubic that draws exactly the same curve
+function toCubic(segments: PathSegment[], i: number, start: Pt) {
+  const s = segments[i];
+  if (s.cmd === 'L') {
+    segments[i] = { cmd: 'C', values: [start.x, start.y, s.values[0], s.values[1], s.values[0], s.values[1]] };
+  } else if (s.cmd === 'Q') {
+    const [qx, qy, x, y] = s.values;
+    segments[i] = {
+      cmd: 'C',
+      values: [start.x + (2 / 3) * (qx - start.x), start.y + (2 / 3) * (qy - start.y), x + (2 / 3) * (qx - x), y + (2 / 3) * (qy - y), x, y],
+    };
+  }
+}
+
+// A cubic whose handles sit on its own end points is a straight line again
+function toLineIfStraight(segments: PathSegment[], i: number, start: Pt) {
+  const s = segments[i];
+  if (s?.cmd !== 'C') return;
+  const [x1, y1, x2, y2, x, y] = s.values;
+  if (dist({ x: x1, y: y1 }, start) <= EPS && dist({ x: x2, y: y2 }, { x, y }) <= EPS) {
+    segments[i] = { cmd: 'L', values: [x, y] };
+  }
+}
+
+// Segments arriving at and leaving a vertex (closing segments of closed shapes included)
+function getVertexNeighbours(segments: PathSegment[], vertex: number) {
+  let incoming: number | null = null;
+  let outgoing: number | null = null;
+  for (const j of getLinkedSegments(segments, vertex)) {
+    if (incoming === null && segments[j].cmd !== 'M') incoming = j;
+    const after = segments[j + 1];
+    if (outgoing === null && after && after.cmd !== 'M' && after.cmd !== 'Z') outgoing = j + 1;
+  }
+  return { incoming, outgoing };
+}
+
+/**
+ * Closed subpaths that end with an implicit straight line (the Z) get that line written
+ * out, so the vertices on both ends of it can have handles. Returns the new segments and
+ * how old segment indices map to new ones.
+ */
+function expandClosingLines(segments: PathSegment[], vertices: number[] | null) {
+  const positions: number[] = [];
+  let first = 0;
+  for (let i = 0; i <= segments.length; i++) {
+    if (i < segments.length && (i === 0 || segments[i].cmd !== 'M')) continue;
+    // Subpath [first, i - 1]
+    const last = i - 1;
+    if (last > first && segments[last].cmd === 'Z' && segments[last - 1].cmd !== 'Z') {
+      const startPt = segmentEnd(segments, first);
+      const closesOnStart = dist(segmentEnd(segments, last - 1), startPt) <= EPS;
+      const touched = vertices === null || vertices.some((v) => v === first || v === last - 1);
+      if (!closesOnStart && last - 1 > first && touched) positions.push(last);
+    }
+    first = i;
+  }
+  if (positions.length === 0) return { segments, remap: (i: number) => i };
+  const next: PathSegment[] = [];
+  segments.forEach((s, i) => {
+    if (positions.includes(i)) {
+      const start = (() => {
+        let k = i;
+        while (k > 0 && segments[k].cmd !== 'M') k--;
+        return segmentEnd(segments, k);
+      })();
+      next.push({ cmd: 'L', values: [start.x, start.y] });
+    }
+    next.push({ cmd: s.cmd, values: [...s.values] });
+  });
+  return { segments: next, remap: (i: number) => i + positions.filter((p) => p <= i).length };
+}
+
+/**
+ * Gives the vertices smooth Bézier handles: the segments around them become cubics and the
+ * handles follow the direction between the neighbouring vertices, mirrored in angle and
+ * length. Vertices that already have both handles are left as they are. Writing out a
+ * closing line can shift segment indices, so `remap` translates the old ones.
+ */
+export function addVertexCurves(segments: PathSegment[], vertices: number[]) {
+  const expanded = expandClosingLines(segments, vertices);
+  const next = cloneSegments(expanded.segments);
+  for (const vertex of vertices.map(expanded.remap)) {
+    if (!next[vertex] || next[vertex].cmd === 'Z') continue;
+    if (getVisibleHandles(next, vertex).length === 2) continue;
+    const { incoming, outgoing } = getVertexNeighbours(next, vertex);
+    const starts = getStartPoints(next);
+    const v = segmentEnd(next, vertex);
+    if (incoming !== null) toCubic(next, incoming, starts[incoming]);
+    if (outgoing !== null) toCubic(next, outgoing, starts[outgoing]);
+    const prev = incoming !== null && next[incoming].cmd === 'C' ? starts[incoming] : null;
+    const after = outgoing !== null && next[outgoing].cmd === 'C' ? segmentEnd(next, outgoing) : null;
+
+    let dir: Pt | null = null;
+    let len = 0;
+    if (prev && after) {
+      dir = { x: after.x - prev.x, y: after.y - prev.y };
+      len = (dist(v, prev) + dist(after, v)) / 6;
+    } else if (after) {
+      dir = { x: after.x - v.x, y: after.y - v.y };
+      len = dist(after, v) / 3;
+    } else if (prev) {
+      dir = { x: v.x - prev.x, y: v.y - prev.y };
+      len = dist(v, prev) / 3;
+    }
+    const dirLen = dir ? Math.hypot(dir.x, dir.y) : 0;
+    if (!dir || dirLen <= EPS || len <= EPS) continue;
+    const u = { x: dir.x / dirLen, y: dir.y / dirLen };
+    const h = getVertexHandles(next, vertex);
+    if (h.in) setHandlePoint(next, h.in, { x: v.x - u.x * len, y: v.y - u.y * len });
+    if (h.out) setHandlePoint(next, h.out, { x: v.x + u.x * len, y: v.y + u.y * len });
+  }
+  return { segments: next, remap: expanded.remap };
+}
+
+// Removes the handles of the vertices (sharp corners); cubics left without handles become lines
+export function removeVertexCurves(segments: PathSegment[], vertices: number[]): PathSegment[] {
+  const next = cloneSegments(segments);
+  const touched = new Set<number>();
+  for (const vertex of vertices) {
+    if (!next[vertex] || next[vertex].cmd === 'Z') continue;
+    const v = segmentEnd(next, vertex);
+    const h = getVertexHandles(next, vertex);
+    for (const ref of [h.in, h.out]) {
+      if (!ref) continue;
+      setHandlePoint(next, ref, v);
+      touched.add(ref.segment);
+    }
+  }
+  const starts = getStartPoints(next);
+  touched.forEach((i) => toLineIfStraight(next, i, starts[i]));
+  return next;
+}
+
+/**
+ * Applies a mirroring to the vertices: their handles are lined up in opposite directions
+ * (along the average of both) and, for 'angleLength', given the same length. A vertex
+ * with a single handle gets the reflection of it on the other side.
+ */
+export function setVertexMirroring(segments: PathSegment[], vertices: number[], mode: MirrorMode): PathSegment[] {
+  if (mode === 'none') return segments;
+  const next = cloneSegments(segments);
+  for (const vertex of vertices) {
+    if (!next[vertex] || next[vertex].cmd === 'Z') continue;
+    const visible = getVisibleHandles(next, vertex);
+    if (visible.length === 0) continue;
+    // The side without a handle needs a cubic to hold the reflected one
+    const { incoming, outgoing } = getVertexNeighbours(next, vertex);
+    const starts = getStartPoints(next);
+    if (incoming !== null) toCubic(next, incoming, starts[incoming]);
+    if (outgoing !== null) toCubic(next, outgoing, starts[outgoing]);
+
+    const v = segmentEnd(next, vertex);
+    const h = getVertexHandles(next, vertex);
+    if (!h.in || !h.out) continue;
+    const a = getHandlePoint(next, h.in);
+    const b = getHandlePoint(next, h.out);
+    const la = dist(a, v);
+    const lb = dist(b, v);
+    const ua = la > EPS ? { x: (v.x - a.x) / la, y: (v.y - a.y) / la } : null; // incoming, pointing forward
+    const ub = lb > EPS ? { x: (b.x - v.x) / lb, y: (b.y - v.y) / lb } : null;
+    let u = ua && ub ? { x: ua.x + ub.x, y: ua.y + ub.y } : (ua ?? ub)!;
+    const ul = Math.hypot(u.x, u.y);
+    u = ul > EPS ? { x: u.x / ul, y: u.y / ul } : (ub ?? ua)!;
+    // A missing handle takes the length of the other one
+    let lenIn = la > EPS ? la : lb;
+    let lenOut = lb > EPS ? lb : la;
+    if (mode === 'angleLength') lenIn = lenOut = (lenIn + lenOut) / 2;
+    setHandlePoint(next, h.in, { x: v.x - u.x * lenIn, y: v.y - u.y * lenIn });
+    setHandlePoint(next, h.out, { x: v.x + u.x * lenOut, y: v.y + u.y * lenOut });
+  }
+  return next;
+}
+
 // ── Shape morphing ───────────────────────────────────────────────────────────
 
 const sameStructure = (a: PathSegment[], b: PathSegment[]) =>
   a.length === b.length && a.every((s, i) => s.cmd === b[i].cmd);
+
+const CURVABLE = new Set<PathCommand>(['L', 'Q', 'C']);
+
+/**
+ * Two paths that only differ in lines vs curves (as when Bézier handles were added to one
+ * keyframe) are rewritten with the same commands, so they can still be morphed.
+ */
+function alignForMorph(a: PathSegment[], b: PathSegment[]): [PathSegment[], PathSegment[]] | null {
+  const ea = expandClosingLines(a, null).segments;
+  const eb = expandClosingLines(b, null).segments;
+  if (ea.length !== eb.length) return null;
+  if (!ea.every((s, i) => s.cmd === eb[i].cmd || (CURVABLE.has(s.cmd) && CURVABLE.has(eb[i].cmd)))) return null;
+  const na = cloneSegments(ea);
+  const nb = cloneSegments(eb);
+  const sa = getStartPoints(na);
+  const sb = getStartPoints(nb);
+  na.forEach((s, i) => {
+    if (s.cmd !== nb[i].cmd) {
+      toCubic(na, i, sa[i]);
+      toCubic(nb, i, sb[i]);
+    }
+  });
+  return [na, nb];
+}
 
 /**
  * Path between two keyframes. Paths with the same structure (as when one keyframe was
@@ -272,9 +600,13 @@ const sameStructure = (a: PathSegment[], b: PathSegment[]) =>
  * shape switches halfway.
  */
 export function interpolatePath(from: string, to: string, progress: number): string {
-  const a = parsePath(from);
-  const b = parsePath(to);
-  if (!sameStructure(a, b)) return progress >= 0.5 ? to : from;
+  let a = parsePath(from);
+  let b = parsePath(to);
+  if (!sameStructure(a, b)) {
+    const aligned = alignForMorph(a, b);
+    if (!aligned) return progress >= 0.5 ? to : from;
+    [a, b] = aligned;
+  }
   return serializePath(
     a.map((s, i) => ({
       cmd: s.cmd,
@@ -289,8 +621,6 @@ export function interpolatePath(from: string, to: string, progress: number): str
 export const isPathString = (v: unknown): v is string => typeof v === 'string' && /^\s*[Mm]/.test(v);
 
 // ── Basic shapes as paths ─────────────────────────────────────────────────────
-
-type Pt = { x: number; y: number };
 
 /**
  * Closed polygon with rounded corners. Each corner is a circular arc written as a cubic

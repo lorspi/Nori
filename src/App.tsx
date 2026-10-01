@@ -721,6 +721,33 @@ export default function App() {
     }));
   };
 
+  // Give keyframes new times (stretching a layer bar redistributes its keyframes)
+  const handleSetKeyframeTimes = (items: (KeyframeRef & { time: number })[]) => {
+    setProject((prev) => ({
+      ...prev,
+      layers: prev.layers.map((layer) => {
+        const layerItems = items.filter((b) => b.layerId === layer.id);
+        if (layerItems.length === 0) return layer;
+        return {
+          ...layer,
+          tracks: layer.tracks.map((track) => {
+            const trackItems = layerItems.filter((b) => b.property === track.property);
+            if (trackItems.length === 0) return track;
+            return {
+              ...track,
+              keyframes: sortKeyframes(
+                track.keyframes.map((kf) => {
+                  const b = trackItems.find((tb) => tb.keyframeId === kf.id);
+                  return b ? { ...kf, time: Number(b.time.toFixed(4)) } : kf;
+                })
+              ),
+            };
+          }),
+        };
+      }),
+    }));
+  };
+
   // Delete one or several keyframes
   const handleDeleteKeyframes = (refs: KeyframeRef[]) => {
     if (refs.length === 0) return;
@@ -840,9 +867,9 @@ export default function App() {
     showToast(`Animación de "${layer.name}" copiada`, 'success');
   };
 
-  // Paste the clipboard onto a layer.
-  // Keyframes are pasted starting at the playhead; a layer animation keeps its original timing
-  // and replaces the target's animation of the same properties.
+  // Paste the clipboard onto a layer, starting at the playhead (moved back if it wouldn't fit).
+  // A layer animation keeps its spacing and is added to the target's animation (keyframes on
+  // the same frames are replaced), so everything stays under the same layer bar.
   const handlePaste = (layerId: string, source: TimelineClipboard | null = clipboard) => {
     const target = project.layers.find((l) => l.id === layerId);
     const clipboard = source;
@@ -853,16 +880,21 @@ export default function App() {
     const pastedRefs: KeyframeRef[] = [];
     let tracks = [...target.tracks];
 
-    if (clipboard.kind === 'keyframes') {
-      const minTime = Math.min(...clipboard.items.map((i) => i.time));
-      const maxTime = Math.max(...clipboard.items.map((i) => i.time));
-      const offset = Math.max(
-        -minTime,
-        Math.min(project.duration - maxTime, snapToFrame(currentTime, project.fps) - minTime)
-      );
+    const times =
+      clipboard.kind === 'keyframes'
+        ? clipboard.items.map((i) => i.time)
+        : clipboard.tracks.flatMap((t) => t.keyframes.map((k) => k.time));
+    const minTime = times.length > 0 ? Math.min(...times) : 0;
+    const maxTime = times.length > 0 ? Math.max(...times) : 0;
+    const offset = Math.max(
+      -minTime,
+      Math.min(project.duration - maxTime, snapToFrame(currentTime, project.fps) - minTime)
+    );
+    const shift = (time: number) => Number((time + offset).toFixed(4));
 
+    if (clipboard.kind === 'keyframes') {
       for (const item of clipboard.items) {
-        const time = Number((item.time + offset).toFixed(4));
+        const time = shift(item.time);
         const kf = { ...createKeyframe(time, item.value), easing: JSON.parse(JSON.stringify(item.easing)) };
         pastedRefs.push({ layerId, property: item.property, keyframeId: kf.id });
 
@@ -877,11 +909,18 @@ export default function App() {
     } else {
       for (const source of clipboard.tracks) {
         const keyframes = source.keyframes.map((k) => ({
-          ...createKeyframe(k.time, k.value),
+          ...createKeyframe(shift(k.time), k.value),
           easing: JSON.parse(JSON.stringify(k.easing)),
         }));
         keyframes.forEach((k) => pastedRefs.push({ layerId, property: source.property, keyframeId: k.id }));
-        tracks = [...tracks.filter((t) => t.property !== source.property), { ...source, keyframes }];
+        const idx = tracks.findIndex((t) => t.property === source.property);
+        if (idx === -1) {
+          tracks.push({ ...source, keyframes });
+        } else {
+          // Added to the existing animation; only keyframes on the same frames are replaced
+          const kept = tracks[idx].keyframes.filter((k) => keyframes.every((p) => Math.abs(k.time - p.time) >= tolerance));
+          tracks[idx] = { ...tracks[idx], keyframes: sortKeyframes([...kept, ...keyframes]) };
+        }
       }
     }
 
@@ -1539,6 +1578,7 @@ export default function App() {
         onAddKeyframe={handleAddKeyframe}
         onDeleteKeyframes={handleDeleteKeyframes}
         onMoveKeyframes={handleMoveKeyframes}
+        onSetKeyframeTimes={handleSetKeyframeTimes}
         clipboardKind={clipboard?.kind ?? null}
         onCopyKeyframes={handleCopyKeyframes}
         onCopyLayerAnimation={handleCopyLayerAnimation}

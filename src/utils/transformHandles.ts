@@ -45,8 +45,9 @@ export interface SelectionHandle {
   world: { x: number; y: number };
 }
 
-// Screen-space padding (px) between the layer bounds and the selection box
-const SELECTION_PADDING = 6;
+// Screen-space padding (px) between the layer bounds and the selection box (0: the box
+// sits right on the layer edges)
+const SELECTION_PADDING = 0;
 
 /**
  * The 8 resize handles of the selection box (4 corners + 4 edge midpoints)

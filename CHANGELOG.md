@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.0.2] — 2026-10-01
+
+### Added
+
+- **Curvas Bézier al editar vértices**
+  Los vértices seleccionados muestran sus tiradores Bézier (una línea y un rombo a cada lado); al arrastrarlos se curvan los lados que salen del vértice. Mover un vértice mueve también sus tiradores, así que la curva conserva su forma.
+
+- **Agregar y quitar curvas**
+  En el modo de edición de vértices aparece una barra en la parte superior del lienzo con "Agregar curva" y "Quitar curva", que actúan sobre los vértices seleccionados. Agregar curva convierte en curva los lados del vértice y le da dos tiradores alineados con los vértices vecinos; quitar curva lo vuelve a convertir en esquina y los lados sin tiradores vuelven a ser rectos. Un doble clic sobre un vértice hace lo mismo: lo curva si es una esquina y lo vuelve esquina si es curvo. También funciona en el vértice inicial de las formas cerradas (rectángulos, polígonos y estrellas convertidos en trazado).
+
+- **Reflejo de los tiradores**
+  La misma barra tiene tres opciones de Reflejo para los vértices seleccionados: "Sin reflejo" (cada tirador se mueve por separado), "Reflejar ángulo" (los tiradores quedan alineados en direcciones opuestas y cada uno conserva su longitud) y "Reflejar ángulo y longitud" (un tirador es el reflejo exacto del otro). Al elegir una opción, los tiradores del vértice se ajustan a ella, y al arrastrar un tirador el otro lo sigue según la opción del vértice. La opción marcada es la del vértice seleccionado. Alt + arrastrar un tirador lo mueve por separado y deja el vértice sin reflejo.
+
+- **Estirar la animación de una capa**
+  Los extremos de la barra azul de la capa en la línea del tiempo se pueden arrastrar: el extremo arrastrado se mueve y el otro queda fijo, y todos los fotogramas clave de la capa se redistribuyen proporcionalmente, así que la animación se hace más lenta o más rápida sin cambiar su ritmo. El extremo se ajusta a los fotogramas, no sale de la línea del tiempo y no puede cruzar el otro extremo. Se deshace en un solo paso.
+
+### Changed
+
+- **Pegar una animación de capa en el cursor de tiempo**
+  Al pegar la animación de una capa (la barra azul completa), empieza en el cursor de tiempo en lugar de en el mismo punto del que se copió, igual que al pegar fotogramas clave. Si no cabe, se adelanta para terminar dentro de la línea del tiempo.
+
+- **Cuadro de selección pegado a la capa**
+  El borde de selección y sus tiradores de escala se dibujan justo sobre los bordes de la capa, sin el margen que quedaba alrededor. Lo mismo ocurre con el cuadro de la selección múltiple.
+
+- **Animar la forma con curvas**
+  La forma sigue transformándose de un fotograma clave a otro aunque en uno de ellos se hayan agregado o quitado curvas: los lados rectos se interpolan como curvas sin tiradores en lugar de cambiar de golpe a mitad de camino.
+
 ## [1.0.1] — 2026-10-01
 
 ### Changed

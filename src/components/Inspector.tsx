@@ -767,7 +767,7 @@ export const Inspector: React.FC<InspectorProps> = ({
               <p className="text-[10px] text-muted-foreground leading-snug">
                 {selectedLayer.type !== 'path'
                   ? 'La forma pasa a ser un trazado con vértices editables.'
-                  : 'Arrastra los vértices en el lienzo (o haz doble clic en el trazado). Selecciona varios con un recuadro o Shift + clic, y muévelos con las flechas (Shift: 10 px). Activa el rombo para animar la forma: cada fotograma clave guarda la posición de los vértices.'}
+                  : 'Arrastra los vértices en el lienzo (o haz doble clic en el trazado). Selecciona varios con un recuadro o Shift + clic, y muévelos con las flechas (Shift: 10 px). Doble clic en un vértice (o "Agregar curva") le añade tiradores Bézier; arrástralos para curvar los lados. Activa el rombo para animar la forma: cada fotograma clave guarda la posición de los vértices.'}
               </p>
             </div>
           </div>

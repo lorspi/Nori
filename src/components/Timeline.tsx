@@ -44,6 +44,7 @@ interface TimelineProps {
   onAddKeyframe: (layerId: string, property: AnimatableProperty, time: number) => void;
   onDeleteKeyframes: (refs: KeyframeRef[]) => void;
   onMoveKeyframes: (base: (KeyframeRef & { time: number })[], delta: number) => void;
+  onSetKeyframeTimes: (items: (KeyframeRef & { time: number })[]) => void;
   onStartKeyframeDrag?: () => void;
   clipboardKind: TimelineClipboard['kind'] | null;
   onCopyKeyframes: (refs: KeyframeRef[]) => void;
@@ -80,6 +81,9 @@ interface KeyframeDrag {
   moved: boolean;
   // Plain click on an already-selected keyframe collapses the selection to it (if not dragged)
   collapseTo: KeyframeRef | null;
+  // Dragging an end of a layer bar: that end (edge) moves and the other one (anchor) stays,
+  // spreading the keyframes in between proportionally
+  stretch?: { anchor: number; edge: number };
 }
 
 // Box selection in client coordinates
@@ -118,6 +122,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   onAddKeyframe,
   onDeleteKeyframes,
   onMoveKeyframes,
+  onSetKeyframeTimes,
   onStartKeyframeDrag,
   clipboardKind,
   onCopyKeyframes,
@@ -275,6 +280,23 @@ export const Timeline: React.FC<TimelineProps> = ({
     startKeyframeDrag(e.clientX, refs, null);
   };
 
+  // An end of the layer bar: stretches or shrinks the layer's animation from the other end
+  const handleBarEdgeMouseDown = (e: React.MouseEvent, layerId: string, side: 'start' | 'end') => {
+    e.stopPropagation();
+    if (e.button !== 0) return;
+    const layer = project.layers.find((l) => l.id === layerId);
+    const range = layer ? getLayerKeyframeRange(layer) : null;
+    if (!layer || !range || range.end - range.start <= 0) return;
+    const refs = getLayerKeyframeRefs(layer);
+    onSelectLayer(layerId);
+    onSelectKeyframes(refs);
+    startKeyframeDrag(e.clientX, refs, null);
+    if (keyframeDragRef.current) {
+      keyframeDragRef.current.stretch =
+        side === 'end' ? { anchor: range.start, edge: range.end } : { anchor: range.end, edge: range.start };
+    }
+  };
+
   // Empty area of the tracks: start a box selection
   const handleTracksMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -325,7 +347,22 @@ export const Timeline: React.FC<TimelineProps> = ({
       }
 
       const drag = keyframeDragRef.current;
-      if (isDraggingKeyframes && drag) {
+      if (isDraggingKeyframes && drag?.stretch) {
+        const { anchor, edge } = drag.stretch;
+        const rawEdge = edge + (e.clientX - drag.startClientX) / pixelsPerSecond;
+        // The moving end stays inside the timeline and at least one frame away from the other
+        const frame = 1 / project.fps;
+        let nextEdge = Math.max(0, Math.min(duration, snapToFrame(rawEdge, project.fps)));
+        nextEdge = edge > anchor ? Math.max(anchor + frame, nextEdge) : Math.min(anchor - frame, nextEdge);
+        if (!drag.moved && Math.abs(nextEdge - edge) > 1e-6) {
+          drag.moved = true;
+          onStartKeyframeDrag?.(); // One undo step for the whole drag
+        }
+        if (drag.moved) {
+          const factor = (nextEdge - anchor) / (edge - anchor);
+          onSetKeyframeTimes(drag.base.map((b) => ({ ...b, time: anchor + (b.time - anchor) * factor })));
+        }
+      } else if (isDraggingKeyframes && drag) {
         const rawDelta = (e.clientX - drag.startClientX) / pixelsPerSecond;
         const delta = Math.max(
           -drag.minTime,
@@ -867,15 +904,35 @@ export const Timeline: React.FC<TimelineProps> = ({
                             left: `${barStartX - barPadding}px`,
                             width: `${barWidth + barPadding * 2}px`,
                           }}
-                          className={`h-4.5 rounded-full absolute flex items-center cursor-grab active:cursor-grabbing transition-colors shadow-sm ${
+                          className={`group h-4.5 rounded-full absolute flex items-center cursor-grab active:cursor-grabbing transition-colors shadow-sm ${
                             isSelected
                               ? 'bg-bento-blue text-white'
                               : 'bg-bento-blue/40 hover:bg-bento-blue/60 text-foreground'
                           }`}
                           onMouseDown={(e) => handleLayerBarMouseDown(e, layer.id)}
                           onContextMenu={(e) => handleBarContextMenu(e, layer.id)}
-                          data-tooltip={"Arrastra para mover todos los fotogramas clave de la capa\nClic derecho para copiar o pegar"}
+                          data-tooltip={"Arrastra para mover todos los fotogramas clave de la capa\nArrastra un extremo para estirar o encoger la animación\nClic derecho para copiar o pegar"}
                         >
+                          {/* Ends: stretch the animation, spreading the keyframes proportionally */}
+                          {range.end > range.start &&
+                            (['start', 'end'] as const).map((side) => (
+                              <div
+                                key={side}
+                                onMouseDown={(e) => handleBarEdgeMouseDown(e, layer.id, side)}
+                                className={`absolute top-0 bottom-0 ${side === 'start' ? 'left-0' : 'right-0'} w-1.75 cursor-ew-resize flex items-center justify-center`}
+                                data-tooltip={
+                                  side === 'start'
+                                    ? 'Arrastra para estirar la animación desde el principio'
+                                    : 'Arrastra para estirar la animación desde el final'
+                                }
+                              >
+                                <div
+                                  className={`w-0.5 h-2.5 rounded-full opacity-0 group-hover:opacity-70 transition-opacity ${
+                                    isSelected ? 'bg-white' : 'bg-bento-blue'
+                                  }`}
+                                />
+                              </div>
+                            ))}
                           {/* Keyframe summary marks */}
                           {getLayerKeyframeTimes(layer).map((t) => (
                             <div
