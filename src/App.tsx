@@ -43,7 +43,7 @@ import {
   createTrack,
   frameTolerance,
   getAdjacentKeyframeTime,
-  getSiblingProperty,
+  getLayerKeyframeRange,
   isSameKeyframeRef,
   resolveKeyframeRefs,
   snapToFrame,
@@ -781,29 +781,18 @@ export default function App() {
     setSelectedKeyframes((prev) => prev.filter((s) => !refs.some((r) => isSameKeyframeRef(r, s))));
   };
 
-  // Apply one easing curve to every selected keyframe. Paired properties that the Inspector
-  // shows as a single parameter (Posición X/Y, Escala X/Y, Anclaje X/Y) get the same curve
-  // on their keyframe at the same time, so the motion stays in sync.
+  // Apply one easing curve to every selected keyframe (each property keeps its own curve,
+  // so Posición X and Y can ease differently even at the same time)
   const handleUpdateKeyframesEasing = (refs: KeyframeRef[], easing: EasingConfig, recordUndo: boolean = true) => {
     if (refs.length === 0) return;
     if (recordUndo) recordHistory(project);
 
     setProject((prev) => {
-      const tolerance = frameTolerance(prev.fps);
       const targets = new Map<string, Set<string>>(); // `${layerId}:${property}` -> keyframe ids
-      const addTarget = (layerId: string, property: string, keyframeId: string) => {
-        const key = `${layerId}:${property}`;
+      for (const { ref } of resolveKeyframeRefs(prev, refs)) {
+        const key = `${ref.layerId}:${ref.property}`;
         if (!targets.has(key)) targets.set(key, new Set());
-        targets.get(key)!.add(keyframeId);
-      };
-
-      for (const { ref, layer, keyframe } of resolveKeyframeRefs(prev, refs)) {
-        addTarget(ref.layerId, ref.property, ref.keyframeId);
-        const sibling = getSiblingProperty(ref.property);
-        const siblingKf = layer.tracks
-          .find((t) => t.property === sibling)
-          ?.keyframes.find((k) => Math.abs(k.time - keyframe.time) < tolerance);
-        if (sibling && siblingKf) addTarget(ref.layerId, sibling, siblingKf.id);
+        targets.get(key)!.add(ref.keyframeId);
       }
 
       return {
@@ -821,6 +810,46 @@ export default function App() {
         })),
       };
     });
+  };
+
+  // Set where a layer's animation starts and how long it lasts (Inspector fields of the layer bar).
+  // The keyframes move and are spread proportionally from the start, like stretching the bar.
+  const handleRetimeLayerAnimation = (
+    layerId: string,
+    timing: { start?: number; length?: number },
+    recordUndo: boolean = true
+  ) => {
+    const layer = project.layers.find((l) => l.id === layerId);
+    if (!layer || !getLayerKeyframeRange(layer)) return;
+    if (recordUndo) recordHistory(project);
+
+    setProject((prev) => ({
+      ...prev,
+      layers: prev.layers.map((l) => {
+        const range = l.id === layerId ? getLayerKeyframeRange(l) : null;
+        if (!range) return l;
+        const frame = 1 / prev.fps;
+        const oldLength = range.end - range.start;
+        // A single instant can only be moved, not stretched
+        let length = oldLength > 0 && timing.length !== undefined ? timing.length : oldLength;
+        length = oldLength > 0 ? Math.max(frame, Math.min(prev.duration, snapToFrame(length, prev.fps))) : 0;
+        let start = snapToFrame(timing.start ?? range.start, prev.fps);
+        start = Math.max(0, Math.min(prev.duration - length, start));
+        const factor = oldLength > 0 ? length / oldLength : 1;
+        return {
+          ...l,
+          tracks: l.tracks.map((track) => ({
+            ...track,
+            keyframes: sortKeyframes(
+              track.keyframes.map((kf) => ({
+                ...kf,
+                time: Number((start + (kf.time - range.start) * factor).toFixed(4)),
+              }))
+            ),
+          })),
+        };
+      }),
+    }));
   };
 
   // Keyframe selection; keeps the Inspector on a layer that owns part of the selection
@@ -1549,6 +1578,7 @@ export default function App() {
           vertexEditLayerId={vertexEditLayerId}
           onToggleVertexEdit={handleToggleVertexEdit}
           onUpdateKeyframesEasing={handleUpdateKeyframesEasing}
+          onRetimeLayerAnimation={handleRetimeLayerAnimation}
           onUpdateProjectSettings={(settings, recordUndo = true) => {
             if (recordUndo) recordHistory(project);
             setProject((prev) => ({ ...prev, ...settings }));

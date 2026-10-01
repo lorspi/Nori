@@ -80,21 +80,6 @@ export function getLayerKeyframeTimes(layer: Layer): number[] {
   return Array.from(times).sort((a, b) => a - b);
 }
 
-// Properties shown as a single parameter in the Inspector (e.g. Posición = X + Y)
-const PROPERTY_SIBLINGS: Partial<Record<AnimatableProperty, AnimatableProperty>> = {
-  x: 'y',
-  y: 'x',
-  anchorX: 'anchorY',
-  anchorY: 'anchorX',
-  scaleX: 'scaleY',
-  scaleY: 'scaleX',
-  stroke: 'strokeWidth',
-  strokeWidth: 'stroke',
-};
-
-export const getSiblingProperty = (prop: string): AnimatableProperty | undefined =>
-  isAnimatableProperty(prop) ? PROPERTY_SIBLINGS[prop] : undefined;
-
 export const isSameKeyframeRef = (a: KeyframeRef, b: KeyframeRef) =>
   a.layerId === b.layerId && a.property === b.property && a.keyframeId === b.keyframeId;
 

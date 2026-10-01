@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.0.3] — 2026-10-01
+
+### Added
+
+- **Editar el inicio y la duración de la animación**
+  Al seleccionar una capa (o su barra azul en la línea del tiempo), los campos Inicio y Duración de la sección Animación del Inspector se pueden editar escribiendo un valor o arrastrando su etiqueta. Cambiar el Inicio mueve todos los fotogramas clave de la capa; cambiar la Duración los redistribuye proporcionalmente desde el inicio, igual que al estirar la barra. Los valores se ajustan a los fotogramas y no salen de la línea del tiempo. Si todos los fotogramas clave están en el mismo instante, solo se puede cambiar el Inicio.
+
+- **Ajustar la duración del proyecto a las animaciones**
+  En los Ajustes del Proyecto, junto al campo Duración, un botón ajusta la duración para que termine en el último fotograma clave de la línea del tiempo. Se desactiva cuando no hay animaciones o la duración ya coincide.
+
+### Changed
+
+- **Curvas independientes en X e Y**
+  Los fotogramas clave de Posición X e Y, Escala X e Y y Anclaje X e Y ya no comparten la curva de suavizado cuando están en el mismo tiempo: cambiar la curva de X no cambia la de Y, y al revés.
+
+- **Campos en español**
+  Los campos Start y Duration de la sección Animación ahora se llaman Inicio y Duración, y la sección "Curva de Suavizado (Value Curve)" se llama simplemente "Curva de Suavizado".
+
 ## [1.0.2] — 2026-10-01
 
 ### Added

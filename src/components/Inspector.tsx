@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  ArrowsInLineHorizontal,
   Clock,
   Sliders,
   Lock,
@@ -45,6 +46,8 @@ interface InspectorProps {
   vertexEditLayerId: string | null;
   onToggleVertexEdit: (layerId: string) => void;
   onUpdateKeyframesEasing: (refs: KeyframeRef[], easing: EasingConfig, recordUndo?: boolean) => void;
+  // Start / length of the layer's animation (the blue bar in the timeline)
+  onRetimeLayerAnimation: (layerId: string, timing: { start?: number; length?: number }, recordUndo?: boolean) => void;
   onUpdateProjectSettings: (settings: Partial<Project>, recordUndo?: boolean) => void;
   onDeleteLayer: (layerId: string) => void;
   onDuplicateLayer: (layerId: string) => void;
@@ -102,6 +105,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   vertexEditLayerId,
   onToggleVertexEdit,
   onUpdateKeyframesEasing,
+  onRetimeLayerAnimation,
   onUpdateProjectSettings,
   onDeleteLayer,
   onDuplicateLayer,
@@ -140,6 +144,14 @@ export const Inspector: React.FC<InspectorProps> = ({
 
   // If no layer selected, show project settings
   if (!selectedLayer) {
+    // Last keyframe of the whole timeline: the duration that fits every animation
+    const animationsEnd = project.layers.reduce((end, layer) => {
+      const range = getLayerKeyframeRange(layer);
+      return range ? Math.max(end, range.end) : end;
+    }, 0);
+    const fitDuration = Math.min(60, Math.max(0.5, Number(animationsEnd.toFixed(4))));
+    const canFitDuration = animationsEnd > 0 && Math.abs(fitDuration - project.duration) > 1e-6;
+
     return (
       <aside className="w-72 shrink-0 bg-card border-l border-border p-3 text-xs overflow-y-auto select-none">
         <div className="flex items-center gap-2 pb-3 mb-3 border-b border-border">
@@ -208,15 +220,27 @@ export const Inspector: React.FC<InspectorProps> = ({
               >
                 Duración (s)
               </ScrubLabel>
-              <input
-                type="number"
-                step="0.5"
-                min="0.5"
-                max="60"
-                value={project.duration}
-                onChange={(e) => onUpdateProjectSettings({ duration: Number(e.target.value) })}
-                className="w-full bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
-              />
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0.5"
+                  max="60"
+                  value={project.duration}
+                  onChange={(e) => onUpdateProjectSettings({ duration: Number(e.target.value) })}
+                  className="w-full min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
+                />
+                <button
+                  type="button"
+                  disabled={!canFitDuration}
+                  onClick={() => onUpdateProjectSettings({ duration: fitDuration })}
+                  className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+                  data-tooltip="Ajustar la duración a las animaciones"
+                  aria-label="Ajustar la duración a las animaciones"
+                >
+                  <ArrowsInLineHorizontal className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
             <div>
               <label className="text-muted-foreground block mb-1">FPS</label>
@@ -390,6 +414,58 @@ export const Inspector: React.FC<InspectorProps> = ({
     );
   };
 
+  // Start / Duración of the layer animation; Duración can't change when every keyframe is at one instant
+  const renderTimingField = (field: 'start' | 'length', label: string, title: string) => {
+    const length = keyframeRange ? keyframeRange.end - keyframeRange.start : 0;
+    const shown = keyframeRange ? Number((field === 'start' ? keyframeRange.start : length).toFixed(2)) : 0;
+    const disabled = !keyframeRange || (field === 'length' && length <= 0);
+    const max = field === 'start' ? project.duration - length : project.duration - (keyframeRange?.start ?? 0);
+    const min = field === 'start' ? 0 : 1 / project.fps;
+    const apply = (v: number, recordUndo = true) => onRetimeLayerAnimation(layerId, { [field]: v }, recordUndo);
+    return (
+      <div
+        className={`flex items-center gap-1 bg-secondary border border-border rounded-md px-1.5 h-7 ${disabled ? 'opacity-60' : ''}`}
+        data-tooltip={keyframeRange ? title : 'La capa no tiene fotogramas clave'}
+      >
+        <Clock className="w-3 h-3 shrink-0 text-bento-blue" />
+        {disabled ? (
+          <span className="text-muted-foreground whitespace-nowrap">{label}</span>
+        ) : (
+          <ScrubLabel
+            value={shown}
+            step={0.01}
+            min={min}
+            max={max}
+            onScrubStart={onStartScrub}
+            onChange={(v) => apply(v, false)}
+            className="text-muted-foreground whitespace-nowrap"
+          >
+            {label}
+          </ScrubLabel>
+        )}
+        {keyframeRange ? (
+          <input
+            type="number"
+            step={0.1}
+            min={min}
+            max={max}
+            value={shown}
+            disabled={disabled}
+            onChange={(e) => {
+              if (e.target.value === '') return;
+              apply(Number(e.target.value));
+            }}
+            className="w-full min-w-0 bg-transparent text-right font-mono text-foreground focus:outline-none disabled:cursor-default"
+            aria-label={label}
+          />
+        ) : (
+          <span className="flex-1 text-right font-mono text-foreground">—</span>
+        )}
+        {keyframeRange && <span className="text-muted-foreground font-mono text-[10px]">s</span>}
+      </div>
+    );
+  };
+
   return (
     <aside className="w-72 shrink-0 bg-card border-l border-border p-3 text-xs overflow-y-auto select-none flex flex-col justify-between">
       <div className="space-y-3">
@@ -416,30 +492,14 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
         </div>
 
-        {/* Timing Section (Start & Duration) */}
+        {/* Timing Section: start and length of the layer bar (editable, retimes its keyframes) */}
         <div>
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
             Animación
           </span>
           <div className="grid grid-cols-2 gap-2">
-            <div className="bg-secondary border border-border rounded-md px-1.5 h-7 flex items-center justify-between">
-              <div className="flex items-center gap-1 text-muted-foreground">
-                <Clock className="w-3 h-3 text-bento-blue" />
-                <span>Start</span>
-              </div>
-              <span className="font-mono text-foreground">
-                {keyframeRange ? `${keyframeRange.start.toFixed(2)}s` : '—'}
-              </span>
-            </div>
-            <div className="bg-secondary border border-border rounded-md px-1.5 h-7 flex items-center justify-between">
-              <div className="flex items-center gap-1 text-muted-foreground">
-                <Clock className="w-3 h-3 text-bento-blue" />
-                <span>Duration</span>
-              </div>
-              <span className="font-mono text-foreground">
-                {keyframeRange ? `${(keyframeRange.end - keyframeRange.start).toFixed(2)}s` : '—'}
-              </span>
-            </div>
+            {renderTimingField('start', 'Inicio', 'Momento en que empieza la animación de la capa')}
+            {renderTimingField('length', 'Duración', 'Duración de la animación de la capa')}
           </div>
         </div>
 
@@ -447,7 +507,7 @@ export const Inspector: React.FC<InspectorProps> = ({
         <div className="pt-2 border-t border-border">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Curva de Suavizado (Value Curve)
+              Curva de Suavizado
             </span>
             <span className="text-[10px] font-mono text-bento-blue">
               {selectionLabel}
