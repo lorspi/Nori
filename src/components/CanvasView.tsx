@@ -63,6 +63,8 @@ interface CanvasViewProps {
   vertexEditLayerId: string | null;
   onToggleVertexEdit: (layerId: string) => void;
   onExitVertexEdit: () => void;
+  // Right click: the layer under the cursor is selected first (unless it already is)
+  onOpenContextMenu?: (clientX: number, clientY: number) => void;
 }
 
 type Point = { x: number; y: number };
@@ -96,6 +98,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
   vertexEditLayerId,
   onToggleVertexEdit,
   onExitVertexEdit,
+  onOpenContextMenu,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -723,6 +726,15 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
         if (hitTestVertex(pt)) return;
         const hit = hitTestLayer(pt);
         if (hit?.type === 'path') onToggleVertexEdit(hit.id);
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (!onOpenContextMenu || drag) return;
+        if (activeTool === 'select' && !vertexEditLayerId) {
+          const hit = hitTestLayer(clientToCanvas(e.clientX, e.clientY));
+          if (hit && !selectedLayerIds.includes(hit.id)) onSelectLayers([hit.id], hit.id);
+        }
+        onOpenContextMenu(e.clientX, e.clientY);
       }}
       style={{ cursor }}
       className="relative flex-1 h-full overflow-hidden bg-background select-none"

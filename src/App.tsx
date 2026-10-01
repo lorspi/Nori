@@ -19,8 +19,24 @@ import { Timeline } from './components/Timeline';
 import { ExportModal } from './components/ExportModal';
 import { ConfirmSwitchProjectModal } from './components/ConfirmSwitchProjectModal';
 import { PasteSvgModal } from './components/PasteSvgModal';
+import { FigmaImportModal } from './components/FigmaImportModal';
+import { AnimationPresetsModal } from './components/AnimationPresetsModal';
+import { ContextMenu, ContextMenuItem } from './components/ContextMenu';
 import { isLottieJson, convertLottieToProject } from './utils/lottieImporter';
-import { convertSvgToProject } from './utils/svgImporter';
+import { convertSvgToProject, importSvg } from './utils/svgImporter';
+import {
+  ClipboardContent,
+  ClipboardProbe,
+  LayersClipboard,
+  classifyClipboardEvent,
+  createLayersClipboard,
+  instantiateClipboardLayers,
+  placeSvgLayers,
+  readClipboard,
+  serializeClipboard,
+  writeClipboardText,
+} from './utils/clipboard';
+import { AnimationPreset, applyAnimationPreset, getPresetDistance, planPresetSpans } from './utils/animationPresets';
 import { getLayerPropertiesAtTime } from './utils/interpolator';
 import {
   createKeyframe,
@@ -83,6 +99,23 @@ export default function App() {
 
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
   const [isPasteSvgOpen, setIsPasteSvgOpen] = useState<boolean>(false);
+  const [isFigmaImportOpen, setIsFigmaImportOpen] = useState<boolean>(false);
+  // Layers that receive a predefined animation (open modal)
+  const [presetTargetIds, setPresetTargetIds] = useState<string[] | null>(null);
+
+  // Copied layers (also written to the system clipboard as Nori JSON)
+  const [layerClipboard, setLayerClipboard] = useState<LayersClipboard | null>(null);
+  const lastCopiedRef = useRef<'layers' | 'timeline' | null>(null);
+  // The last copy could not reach the system clipboard: pasting uses the in-app copy
+  const clipboardWriteFailedRef = useRef(false);
+  // Ctrl + Shift + V pastes without animation; the paste event doesn't carry the modifiers
+  const pasteWithoutAnimationRef = useRef(false);
+  const pasteFallbackTimerRef = useRef<number | null>(null);
+  // Where the last click happened: Ctrl + C copies keyframes after clicking the timeline
+  const lastClickRegionRef = useRef<'timeline' | 'other'>('other');
+  // Canvas context menu; probe is the clipboard check ('checking' while it runs)
+  const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; probe: ClipboardProbe | 'checking' } | null>(null);
+  const canvasMenuTokenRef = useRef(0);
 
   const lastFrameTimeRef = useRef<number | null>(null);
   const projectRef = useRef<Project>(project);
@@ -263,8 +296,8 @@ export default function App() {
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Editor shortcuts are paused while the About view is open
-      if (isAboutOpen) return;
+      // Editor shortcuts are paused while the About view or a Nori dialog is open
+      if (isAboutOpen || presetTargetIds || isFigmaImportOpen) return;
 
       // Undo / Redo shortcuts
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
@@ -295,20 +328,38 @@ export default function App() {
         return;
       }
 
-      // Copy / paste keyframes
+      // Copy keyframes (after clicking the timeline, or with no layer selected) or layers
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
-        if (selectedKeyframes.length > 0) {
+        const copyKeyframes =
+          selectedKeyframes.length > 0 && (lastClickRegionRef.current === 'timeline' || selectedLayerIds.length === 0);
+        if (copyKeyframes) {
           e.preventDefault();
           handleCopyKeyframes(selectedKeyframes);
+        } else if (selectedLayerIds.length > 0) {
+          e.preventDefault();
+          handleCopyLayers(selectedLayerIds);
         }
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
-        if (clipboard && selectedLayerId) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+        if (selectedLayerIds.length > 0) {
           e.preventDefault();
-          handlePaste(selectedLayerId);
+          handleCutLayers(selectedLayerIds);
         }
+        return;
+      }
+
+      // Paste is handled by the paste event, which reads the system clipboard without
+      // permissions. If the browser doesn't fire it (no editable target), the in-app copy is used.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        pasteWithoutAnimationRef.current = e.shiftKey;
+        if (pasteFallbackTimerRef.current) clearTimeout(pasteFallbackTimerRef.current);
+        const withAnimation = !e.shiftKey;
+        pasteFallbackTimerRef.current = window.setTimeout(() => {
+          pasteFallbackTimerRef.current = null;
+          pasteFromInAppClipboard(withAnimation);
+        }, 150);
         return;
       }
 
@@ -367,7 +418,35 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [project.fps, project.duration, selectedKeyframes, selectedLayerId, selectedLayerIds, clipboard, currentTime, project, handleUndo, handleRedo, isAboutOpen, vertexEditLayerId]);
+  });
+
+  // Paste (Ctrl + V): Nori layers or keyframes, or SVG code as new layers
+  useEffect(() => {
+    const handlePasteEvent = (e: ClipboardEvent) => {
+      if (pasteFallbackTimerRef.current) {
+        clearTimeout(pasteFallbackTimerRef.current);
+        pasteFallbackTimerRef.current = null;
+      }
+      if (isAboutOpen || presetTargetIds || isFigmaImportOpen || isPasteSvgOpen || isExportOpen) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName) || target.isContentEditable)) return;
+      e.preventDefault();
+      const withAnimation = !pasteWithoutAnimationRef.current;
+      pasteWithoutAnimationRef.current = false;
+      pasteClipboardContent(classifyClipboardEvent(e), withAnimation, true);
+    };
+    window.addEventListener('paste', handlePasteEvent);
+    return () => window.removeEventListener('paste', handlePasteEvent);
+  });
+
+  // Remember whether the last click was on the timeline (decides what Ctrl + C copies)
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      lastClickRegionRef.current = (e.target as Element | null)?.closest?.('footer') ? 'timeline' : 'other';
+    };
+    window.addEventListener('mousedown', handleMouseDown, true);
+    return () => window.removeEventListener('mousedown', handleMouseDown, true);
+  }, []);
 
   // Start an interactive drag action (records pre-drag snapshot once for complete undo)
   const handleStartDrag = useCallback(() => {
@@ -681,7 +760,7 @@ export default function App() {
   const handleCopyKeyframes = (refs: KeyframeRef[]) => {
     const resolved = resolveKeyframeRefs(project, refs);
     if (resolved.length === 0) return;
-    setClipboard({
+    copyTimelineClipboard({
       kind: 'keyframes',
       items: resolved.map(({ track, keyframe }) => ({
         property: track.property,
@@ -696,19 +775,29 @@ export default function App() {
     );
   };
 
+  // Keyframes or a layer animation go to the timeline clipboard and to the system clipboard
+  const copyTimelineClipboard = (data: TimelineClipboard) => {
+    setClipboard(data);
+    lastCopiedRef.current = 'timeline';
+    writeClipboardText(serializeClipboard({ kind: 'timeline', clipboard: data })).then((ok) => {
+      clipboardWriteFailedRef.current = !ok;
+    });
+  };
+
   // Copy every animation of a layer (its whole blue bar)
   const handleCopyLayerAnimation = (layerId: string) => {
     const layer = project.layers.find((l) => l.id === layerId);
     if (!layer || layer.tracks.length === 0) return;
-    setClipboard({ kind: 'layer', tracks: JSON.parse(JSON.stringify(layer.tracks)) });
+    copyTimelineClipboard({ kind: 'layer', tracks: JSON.parse(JSON.stringify(layer.tracks)) });
     showToast(`Animación de "${layer.name}" copiada`, 'success');
   };
 
   // Paste the clipboard onto a layer.
   // Keyframes are pasted starting at the playhead; a layer animation keeps its original timing
   // and replaces the target's animation of the same properties.
-  const handlePaste = (layerId: string) => {
+  const handlePaste = (layerId: string, source: TimelineClipboard | null = clipboard) => {
     const target = project.layers.find((l) => l.id === layerId);
+    const clipboard = source;
     if (!clipboard || !target) return;
     recordHistory(project);
 
@@ -757,6 +846,273 @@ export default function App() {
     showToast(
       clipboard.kind === 'layer' ? `Animación pegada en "${target.name}"` : 'Fotogramas clave pegados',
       'success'
+    );
+  };
+
+  // ── Layer clipboard ─────────────────────────────────────────────────────────
+
+  // Copy layers (keeping their stacking order) to the in-app and the system clipboard
+  const handleCopyLayers = (layerIds: string[], silent = false) => {
+    const current = projectRef.current;
+    const layers = current.layers.filter((l) => layerIds.includes(l.id));
+    if (layers.length === 0) return;
+    const data = createLayersClipboard(layers, currentTime, current.duration);
+    setLayerClipboard(data);
+    lastCopiedRef.current = 'layers';
+    writeClipboardText(serializeClipboard(data)).then((ok) => {
+      clipboardWriteFailedRef.current = !ok;
+    });
+    if (!silent) showToast(layers.length === 1 ? `Capa "${layers[0].name}" copiada` : `${layers.length} capas copiadas`, 'success');
+  };
+
+  const handleCutLayers = (layerIds: string[]) => {
+    const count = projectRef.current.layers.filter((l) => layerIds.includes(l.id)).length;
+    if (count === 0) return;
+    handleCopyLayers(layerIds, true);
+    handleDeleteLayers(layerIds, true);
+    showToast(count === 1 ? 'Capa cortada' : `${count} capas cortadas`, 'success');
+  };
+
+  // Add layers above the top-most selected layer (or on top of everything) and select them
+  const insertLayers = (newLayers: Layer[], message: string) => {
+    if (newLayers.length === 0) return;
+    const current = projectRef.current;
+    recordHistory(current);
+    const indices = selectedLayerIds.map((id) => current.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0);
+    const at = indices.length > 0 ? Math.max(...indices) + 1 : current.layers.length;
+    const layers = [...current.layers];
+    layers.splice(at, 0, ...newLayers);
+    setProject({ ...current, layers });
+    handleSelectLayers(
+      newLayers.map((l) => l.id),
+      newLayers[newLayers.length - 1].id
+    );
+    setSelectedKeyframes([]);
+    setActiveTool('select');
+    showToast(message, 'success');
+  };
+
+  const pasteLayersClipboard = (data: LayersClipboard, withAnimation: boolean) => {
+    const layers = instantiateClipboardLayers(data, projectRef.current, withAnimation);
+    const what = layers.length === 1 ? `Capa "${layers[0].name}" pegada` : `${layers.length} capas pegadas`;
+    insertLayers(layers, withAnimation ? what : `${what} sin animación`);
+  };
+
+  // SVG code from the clipboard becomes new layers, centred on the canvas
+  const handlePasteSvgLayers = async (svgText: string, withAnimation: boolean) => {
+    let result;
+    try {
+      result = await importSvg(svgText, projectRef.current.fps);
+    } catch (err: any) {
+      showToast(`No se pudo pegar el SVG: ${err?.message || 'formato no válido'}`, 'error');
+      return;
+    }
+    if (result.layers.length === 0) {
+      showToast('El SVG no contiene formas que se puedan pegar', 'warning');
+      return;
+    }
+    const layers = placeSvgLayers(result.layers, result, projectRef.current, withAnimation);
+    const count = layers.length === 1 ? '1 capa' : `${layers.length} capas`;
+    const skipped = result.skipped > 0 ? ` · ${result.skipped} elementos no compatibles omitidos` : '';
+    insertLayers(
+      layers,
+      result.animated && withAnimation ? `SVG animado pegado: ${count}${skipped}` : `SVG pegado: ${count}${skipped}`
+    );
+  };
+
+  // Paste what the clipboard holds. Returns false when there was nothing to paste.
+  // fromKeyboard: unrecognised content falls back to the in-app copy when the system clipboard
+  // could not be written.
+  const pasteClipboardContent = (content: ClipboardContent, withAnimation: boolean, fromKeyboard = false): boolean => {
+    if (content?.type === 'nori') {
+      const data = content.data;
+      if (data.kind === 'layers') {
+        pasteLayersClipboard(data, withAnimation);
+        return true;
+      }
+      setClipboard(data.clipboard);
+      if (selectedLayerId) handlePaste(selectedLayerId, data.clipboard);
+      else showToast('Selecciona una capa para pegar los fotogramas clave', 'info');
+      return true;
+    }
+    if (content?.type === 'svg') {
+      handlePasteSvgLayers(content.svg, withAnimation);
+      return true;
+    }
+    if (content?.type === 'figma') {
+      showToast('Figma copia en un formato propio: en Figma usa "Copiar como SVG" para pegarlo aquí', 'info');
+      return true;
+    }
+    if (fromKeyboard && clipboardWriteFailedRef.current) return pasteFromInAppClipboard(withAnimation);
+    return false;
+  };
+
+  const pasteFromInAppClipboard = (withAnimation: boolean): boolean => {
+    if (lastCopiedRef.current === 'layers' && layerClipboard) {
+      pasteLayersClipboard(layerClipboard, withAnimation);
+      return true;
+    }
+    if (lastCopiedRef.current === 'timeline' && clipboard && selectedLayerId) {
+      handlePaste(selectedLayerId);
+      return true;
+    }
+    return false;
+  };
+
+  // Paste from the canvas menu: uses the content found when the menu opened, or reads the
+  // clipboard now if it couldn't be checked silently
+  const handleMenuPaste = async (probe: ClipboardProbe, withAnimation: boolean) => {
+    const read = probe.status === 'ok' ? probe : await readClipboard();
+    const pasted =
+      read.status === 'ok'
+        ? pasteClipboardContent(read.content, withAnimation, true)
+        : pasteFromInAppClipboard(withAnimation);
+    if (!pasted) {
+      showToast(
+        read.status === 'ok'
+          ? 'El portapapeles no contiene capas de Nori ni código SVG'
+          : 'El navegador no deja leer el portapapeles: usa Ctrl + V',
+        'warning'
+      );
+    }
+  };
+
+  // Right click on the canvas: open the menu and check the clipboard to enable "Pegar"
+  const handleOpenCanvasMenu = (x: number, y: number) => {
+    const token = ++canvasMenuTokenRef.current;
+    setCanvasMenu({ x, y, probe: 'checking' });
+    readClipboard(true).then((probe) => {
+      if (canvasMenuTokenRef.current === token) setCanvasMenu((m) => (m ? { ...m, probe } : m));
+    });
+  };
+
+  const closeCanvasMenu = useCallback(() => {
+    canvasMenuTokenRef.current++;
+    setCanvasMenu(null);
+  }, []);
+
+  const buildCanvasMenuItems = (probe: ClipboardProbe | 'checking'): ContextMenuItem[] => {
+    const hasSelection = selectedLayerIds.length > 0;
+    let canPaste = false;
+    if (probe !== 'checking') {
+      if (probe.status === 'unknown') {
+        canPaste = true; // Can't be checked without asking: decided when pasting
+      } else {
+        const c = probe.content;
+        canPaste =
+          c?.type === 'svg' ||
+          (c?.type === 'nori' && c.data.kind === 'layers') ||
+          (c === null && clipboardWriteFailedRef.current && lastCopiedRef.current === 'layers' && !!layerClipboard);
+      }
+    }
+    const resolvedProbe: ClipboardProbe = probe === 'checking' ? { status: 'unknown' } : probe;
+    return [
+      { label: 'Copiar', shortcut: 'Ctrl+C', disabled: !hasSelection, onSelect: () => handleCopyLayers(selectedLayerIds) },
+      { label: 'Cortar', shortcut: 'Ctrl+X', disabled: !hasSelection, onSelect: () => handleCutLayers(selectedLayerIds) },
+      {
+        label: probe === 'checking' ? 'Pegar (comprobando…)' : 'Pegar',
+        shortcut: 'Ctrl+V',
+        disabled: !canPaste,
+        onSelect: () => handleMenuPaste(resolvedProbe, true),
+      },
+      {
+        label: 'Pegar sin animación',
+        shortcut: 'Ctrl+Shift+V',
+        disabled: !canPaste,
+        onSelect: () => handleMenuPaste(resolvedProbe, false),
+      },
+      'separator',
+      {
+        label: 'Animaciones predeterminadas…',
+        disabled: !hasSelection,
+        onSelect: () => setPresetTargetIds(selectedLayerIds),
+      },
+      'separator',
+      {
+        label: selectedLayerIds.length > 1 ? `Eliminar ${selectedLayerIds.length} capas` : 'Eliminar',
+        shortcut: 'Supr',
+        danger: true,
+        disabled: !hasSelection,
+        onSelect: () => handleDeleteLayers(selectedLayerIds),
+      },
+    ];
+  };
+
+  // ── Predefined animations ───────────────────────────────────────────────────
+
+  // From the timeline menu: the layer, or the whole selection when the layer is part of it
+  const handleOpenAnimationPresets = (layerId: string) => {
+    setPresetTargetIds(selectedLayerIds.includes(layerId) ? selectedLayerIds : [layerId]);
+  };
+
+  const handleApplyAnimationPreset = (preset: AnimationPreset, length: number) => {
+    const ids = presetTargetIds ?? [];
+    const current = projectRef.current;
+    const targets = current.layers.filter((l) => ids.includes(l.id));
+    if (targets.length === 0) {
+      setPresetTargetIds(null);
+      return;
+    }
+    const spans = planPresetSpans(preset.category, currentTime, length, current.duration, current.fps);
+    const distance = getPresetDistance(current.width, current.height);
+    recordHistory(current);
+    const refs: KeyframeRef[] = [];
+    const layers = current.layers.map((layer) => {
+      if (!ids.includes(layer.id)) return layer;
+      const applied = applyAnimationPreset(layer, preset, spans, current.fps, distance);
+      refs.push(...applied.refs);
+      return applied.layer;
+    });
+    setProject({ ...current, layers });
+    setSelectedKeyframes(refs);
+    setPresetTargetIds(null);
+    showToast(
+      `Animación "${preset.name}" añadida a ${targets.length === 1 ? `"${targets[0].name}"` : `${targets.length} capas`}`,
+      'success'
+    );
+  };
+
+  // ── Figma ───────────────────────────────────────────────────────────────────
+
+  // A frame copied from Figma with "Copy as SVG" opens as a new project. The frame's own
+  // background (a full-size rectangle at the bottom) becomes the project background.
+  const handleImportFigma = async (svgText: string) => {
+    let converted;
+    try {
+      converted = await convertSvgToProject(svgText, 'figma_frame');
+    } catch (err: any) {
+      showToast(`No se pudo importar el frame: ${err?.message || 'formato no válido'}`, 'error');
+      return;
+    }
+    let figmaProject = converted.project;
+    const [first] = figmaProject.layers;
+    const p = first?.properties;
+    const isFrameBackground =
+      !!first &&
+      first.type === 'rect' &&
+      first.tracks.length === 0 &&
+      Math.abs(p.rotation) < 0.01 &&
+      Math.abs(p.scaleX - 1) < 0.001 &&
+      Math.abs(p.scaleY - 1) < 0.001 &&
+      Math.abs(p.width - figmaProject.width) < 1 &&
+      Math.abs(p.height - figmaProject.height) < 1 &&
+      Math.abs(p.x - figmaProject.width / 2) < 1 &&
+      Math.abs(p.y - figmaProject.height / 2) < 1 &&
+      /^#[0-9a-f]{6}$/i.test(p.fill) &&
+      p.stroke === 'transparent' &&
+      p.opacity >= 0.999 &&
+      !p.radius;
+    if (isFrameBackground) {
+      figmaProject = { ...figmaProject, backgroundColor: p.fill, layers: figmaProject.layers.slice(1) };
+    }
+    if (figmaProject.layers.length === 0 && !isFrameBackground) {
+      showToast('El frame no contiene formas que se puedan importar', 'warning');
+      return;
+    }
+    const skipped = converted.result.skipped > 0 ? ` · ${converted.result.skipped} elementos no compatibles omitidos` : '';
+    handleRequestOpenProject(
+      figmaProject,
+      `Frame de Figma importado: ${figmaProject.layers.length} capas, ${figmaProject.width} × ${figmaProject.height} px${skipped}`
     );
   };
 
@@ -938,7 +1294,7 @@ export default function App() {
   };
 
   // Delete Layer
-  const handleDeleteLayers = (layerIds: string[]) => {
+  const handleDeleteLayers = (layerIds: string[], silent = false) => {
     if (layerIds.length === 0) return;
     recordHistory(project);
 
@@ -949,7 +1305,7 @@ export default function App() {
     const remaining = selectedLayerIds.filter((id) => !layerIds.includes(id));
     handleSelectLayers(remaining, remaining.includes(selectedLayerId ?? '') ? selectedLayerId : (remaining[0] ?? null));
     setSelectedKeyframes((prev) => prev.filter((r) => !layerIds.includes(r.layerId)));
-    if (layerIds.length > 1) showToast(`${layerIds.length} capas eliminadas`, 'success');
+    if (layerIds.length > 1 && !silent) showToast(`${layerIds.length} capas eliminadas`, 'success');
   };
   const handleDeleteLayer = (layerId: string) => handleDeleteLayers([layerId]);
 
@@ -1061,6 +1417,7 @@ export default function App() {
         onLoadJson={handleRequestOpenProject}
         onImportSvg={handleImportSvg}
         onOpenPasteSvg={() => setIsPasteSvgOpen(true)}
+        onOpenFigmaImport={() => setIsFigmaImportOpen(true)}
         onOpenExample={handleOpenExampleProject}
         onRenameProject={(title) => {
           recordHistory(project);
@@ -1085,6 +1442,7 @@ export default function App() {
           vertexEditLayerId={vertexEditLayerId}
           onToggleVertexEdit={handleToggleVertexEdit}
           onExitVertexEdit={() => setVertexEditLayerId(null)}
+          onOpenContextMenu={handleOpenCanvasMenu}
           activeTool={activeTool}
           zoom={zoom}
           setZoom={setZoom}
@@ -1139,7 +1497,17 @@ export default function App() {
         onPaste={handlePaste}
         onStartKeyframeDrag={handleStartDrag}
         onSeekKeyframe={handleSeekKeyframe}
+        onOpenAnimationPresets={handleOpenAnimationPresets}
       />
+
+      {canvasMenu && (
+        <ContextMenu
+          x={canvasMenu.x}
+          y={canvasMenu.y}
+          items={buildCanvasMenuItems(canvasMenu.probe)}
+          onClose={closeCanvasMenu}
+        />
+      )}
 
       {/* Modals */}
       <ExportModal
@@ -1155,6 +1523,22 @@ export default function App() {
         isOpen={isPasteSvgOpen}
         onClose={() => setIsPasteSvgOpen(false)}
         onImport={(svgText) => handleImportSvg(svgText, 'svg_pegado')}
+      />
+
+      <FigmaImportModal
+        isOpen={isFigmaImportOpen}
+        onClose={() => setIsFigmaImportOpen(false)}
+        onImport={handleImportFigma}
+      />
+
+      <AnimationPresetsModal
+        isOpen={presetTargetIds !== null}
+        targetNames={project.layers.filter((l) => presetTargetIds?.includes(l.id)).map((l) => l.name)}
+        currentTime={currentTime}
+        projectDuration={project.duration}
+        fps={project.fps}
+        onClose={() => setPresetTargetIds(null)}
+        onApply={handleApplyAnimationPreset}
       />
 
       {/* Confirmation Modal when switching or opening another project */}

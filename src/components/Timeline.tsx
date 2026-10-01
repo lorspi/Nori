@@ -50,6 +50,7 @@ interface TimelineProps {
   onCopyLayerAnimation: (layerId: string) => void;
   onPaste: (layerId: string) => void;
   onSeekKeyframe: (direction: -1 | 1) => void;
+  onOpenAnimationPresets: (layerId: string) => void;
 }
 
 // Resizable timeline height (remembered per browser)
@@ -123,6 +124,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   onCopyLayerAnimation,
   onPaste,
   onSeekKeyframe,
+  onOpenAnimationPresets,
 }) => {
   const timelineRootRef = useRef<HTMLElement>(null);
   const tracksContainerRef = useRef<HTMLDivElement>(null);
@@ -438,7 +440,10 @@ export const Timeline: React.FC<TimelineProps> = ({
     const layer = project.layers.find((l) => l.id === m.layerId);
     const hasAnimation = !!layer && layer.tracks.length > 0;
     const count = m.refs.length;
-    const items: ContextMenuItem[] = [];
+    const items: ContextMenuItem[] = [
+      { label: 'Animaciones predeterminadas…', onSelect: () => onOpenAnimationPresets(m.layerId) },
+      'separator',
+    ];
 
     if (m.kind === 'keyframe') {
       items.push({

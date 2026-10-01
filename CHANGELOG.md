@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.0.0] — 2026-10-01
+
+### Added
+
+- **Copiar, cortar y pegar capas**
+  Ctrl + C copia las capas seleccionadas, Ctrl + X las corta y Ctrl + V las pega encima de la selección (o encima de todas si no hay ninguna), con su animación y en la misma posición. Ctrl + Shift + V pega las capas sin animación: sin fotogramas clave y con el aspecto que tenían en el cursor de tiempo cuando se copiaron. Las capas se copian al portapapeles del sistema, así que también se pueden pegar en otra pestaña o en otro proyecto. Si una capa duraba todo el proyecto de origen, dura todo el proyecto de destino, y si su nombre ya existe se le añade "Copia". Pegar se deshace en un solo paso.
+
+- **Menú contextual del lienzo**
+  El clic derecho sobre el lienzo abre un menú con Copiar, Cortar, Pegar, Pegar sin animación, Animaciones predeterminadas y Eliminar. Si la capa bajo el cursor no estaba seleccionada, se selecciona antes de abrir el menú; sobre una capa de la selección, se mantiene la selección múltiple.
+
+- **Pegar SVG como capas**
+  Al pegar código SVG (Ctrl + V o desde el menú del lienzo), cada forma se añade como una capa nueva del proyecto abierto, en lugar de abrir un proyecto nuevo. El SVG se centra en el lienzo y, si es más grande, se reduce para que quepa. Los SVG animados traen su animación; con "Pegar sin animación" se pegan quietos.
+
+- **Detección del contenido del portapapeles**
+  Al abrir el menú del lienzo, Nori comprueba qué hay en el portapapeles: Pegar y Pegar sin animación solo se activan si hay capas de Nori o código SVG. Mientras se comprueba, la opción muestra "Pegar (comprobando…)". La primera vez el navegador puede pedir permiso para leer el portapapeles; en los navegadores que no permiten leerlo sin preguntar (Firefox, Safari), las opciones quedan activas y se comprueba al pegar.
+
+- **Importar desde Figma**
+  El menú Abrir tiene la opción "Importar desde Figma". La ventana explica los pasos: seleccionar el frame en Figma, copiarlo con clic derecho › Copiar/Pegar como › Copiar como SVG y pulsar Importar (o Ctrl + V) en Nori. Se crea un proyecto nuevo con el tamaño del frame, el color de fondo del frame como fondo del lienzo y una capa por cada forma. Si se copió el frame con un Ctrl + C normal, Nori avisa de que Figma usa un formato propio y pide usar "Copiar como SVG". Como al abrir cualquier proyecto, si hay cambios sin guardar primero se pide confirmación.
+
+- **Animaciones predeterminadas**
+  El menú contextual de la línea del tiempo (y el del lienzo) tiene la opción "Animaciones predeterminadas…", que abre una ventana con cuatro pestañas: Entrada, Salida, Entrada y salida, y Movimiento. Cada animación tiene un nombre y una vista previa que se reproduce al pasar el ratón por encima. Al hacer clic, sus fotogramas clave se añaden a la capa (o a todas las capas seleccionadas) y quedan seleccionados en la línea del tiempo. La animación parte de los valores propios de la capa (posición, escala, rotación, opacidad y desenfoque), así que funciona en cualquier capa y siempre termina o empieza donde está la capa. Se elige la duración (de 0.3 s a 2 s) y el pie de la ventana muestra en qué tramo se añadirá. Las entradas, salidas y movimientos empiezan en el cursor de tiempo; "Entrada y salida" entra en el cursor de tiempo y sale al final de la línea del tiempo. Si no caben, se adelantan para terminar dentro del proyecto. Los fotogramas clave de los mismos parámetros que hubiera dentro de ese tramo se reemplazan. Se deshace en un solo paso.
+  - Entrada: Aparecer, Desde la izquierda, Desde la derecha, Desde abajo, Desde arriba, Ampliar, Encoger, Pop, Elástico, Caer con rebote, Girar, Enfocar y Desplegar.
+  - Salida: Desvanecer, Hacia la izquierda, Hacia la derecha, Hacia arriba, Hacia abajo, Reducir, Ampliar y desvanecer, Hundir, Caer, Girar y salir, Desenfocar y Plegar.
+  - Entrada y salida: Aparecer y desvanecer, De izquierda a derecha, De derecha a izquierda, De abajo hacia arriba, De arriba hacia abajo, Ampliar y reducir, Pop, Elástico, Caer con rebote, Girar, Enfocar y desenfocar, y Desplegar y plegar.
+  - Movimiento: Pulso, Latido, Sacudir, Tambalear, Flotar, Saltar, Giro de 360°, Parpadear, Gelatina y Tada.
+
+### Changed
+
+- **Copiar fotogramas clave**
+  Ctrl + C copia los fotogramas clave seleccionados cuando el último clic fue en la línea del tiempo (o si no hay capas seleccionadas); si no, copia las capas. Los fotogramas clave y las animaciones de capa copiados también pasan al portapapeles del sistema, para pegarlos en otra pestaña.
+
+### Fixed
+
+- **Rastro al mover capas sobre un fondo transparente**
+  Con el fondo del proyecto transparente y la opción Transparencia de la barra superior desactivada, el lienzo no se borraba entre fotogramas: al mover o animar una capa quedaba un rastro de todas sus posiciones anteriores. Ahora el lienzo se limpia en cada fotograma, también en las exportaciones de video y GIF.
+
 ## [0.4.0] — 2026-10-01
 
 ### Added

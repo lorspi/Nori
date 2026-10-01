@@ -18,6 +18,7 @@ import {
   ArrowUUpLeft as Undo2,
   ArrowUUpRight as Redo2,
   Info,
+  FigmaLogo,
 } from '@phosphor-icons/react';
 import { Project } from '../types/animation';
 import { ToastType } from '../lib/ui';
@@ -57,6 +58,7 @@ interface TopBarProps {
   onLoadJson: (project: Project, message?: string) => void;
   onImportSvg: (svgText: string, fileName: string) => void;
   onOpenPasteSvg: () => void;
+  onOpenFigmaImport: () => void;
   onOpenExample: () => void;
   onRenameProject: (title: string) => void;
   onAddLayer: (type: ShapeType) => void;
@@ -82,6 +84,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onLoadJson,
   onImportSvg,
   onOpenPasteSvg,
+  onOpenFigmaImport,
   onOpenExample,
   onRenameProject,
   onAddLayer,
@@ -342,7 +345,16 @@ export const TopBar: React.FC<TopBarProps> = ({
                   role="menuitem"
                 >
                   <ClipboardText className="w-3.5 h-3.5 text-bento-blue" />
-                  <span>Pegar SVG</span>
+                  <span>Código SVG</span>
+                </button>
+                <button
+                  onClick={onOpenFigmaImport}
+                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
+                  data-tooltip="Crear un proyecto a partir de un frame copiado en Figma"
+                  role="menuitem"
+                >
+                  <FigmaLogo className="w-3.5 h-3.5 text-bento-blue" />
+                  <span>Importar desde Figma</span>
                 </button>
                 <div className="my-1 border-t border-border" />
                 <button

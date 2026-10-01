@@ -196,14 +196,16 @@ export function renderProjectFrame(
   ctx.save();
   ctx.scale(scale, scale);
 
+  // Always clear first: filling with a transparent background color paints nothing, so the
+  // previous frame would stay underneath (smearing when a layer moves)
+  ctx.clearRect(0, 0, project.width, project.height);
+
   // Background handling
   if (options.drawCheckerboard) {
     drawCheckerboard(ctx, project.width, project.height, 16);
   } else if (!options.transparent) {
     ctx.fillStyle = options.backgroundColor || project.backgroundColor || '#ffffff';
     ctx.fillRect(0, 0, project.width, project.height);
-  } else {
-    ctx.clearRect(0, 0, project.width, project.height);
   }
 
   // Render layers in forward order (back to front)
