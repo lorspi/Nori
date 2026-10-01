@@ -1,5 +1,76 @@
 # Changelog
 
+## [0.3.0] — 2026-09-30
+
+### Added
+
+- **Animación de vértices (forma del vector)**
+  El nuevo parámetro "Forma (vértices)" anima la silueta de un trazado moviendo sus vértices. En el apartado Forma del inspector, "Editar vértices" (o doble clic sobre el trazado en el lienzo) muestra un punto en cada vértice; al arrastrarlo, las asas de las curvas conectadas se mueven con él para conservar la forma. Se pueden seleccionar varios vértices con un recuadro o con Shift + clic (Shift + clic sobre uno seleccionado lo quita de la selección); al arrastrar cualquiera de ellos se mueven todos, y las flechas del teclado los desplazan 1 px (10 px con Shift). Cada arrastre o pulsación de flecha se deshace en un solo paso. Con el rombo activado, cada fotograma clave guarda la posición de los vértices y Nori interpola la forma entre ellos con la curva de suavizado elegida. Esc, Enter o un clic fuera de la forma (sin arrastrar) terminan la edición. Las formas básicas se convierten primero en trazado con "Convertir en trazado y editar vértices", que conserva su aspecto, incluidas las esquinas redondeadas. En la exportación SVG, la animación de la forma se escribe como animación CSS del trazado.
+
+- **Desenfoque gaussiano**
+  El nuevo apartado Efectos del inspector añade un desenfoque gaussiano a cualquier capa, en píxeles y animable con su rombo. Se ve igual en el lienzo y en las exportaciones de video y GIF, escala con la capa, y en el SVG se exporta como `filter: blur()`.
+
+- **Esquinas redondeadas**
+  Rectángulos, triángulos, polígonos y estrellas tienen un campo "Radio" en el nuevo apartado Forma, animable con su rombo. El radio se limita para que las esquinas vecinas nunca se monten.
+
+- **Trazo de las formas**
+  En "Relleno y trazo" se elige el color y el grosor del trazo de la forma, que también se animan. Tanto el relleno como el trazo se quitan con el botón "−" y se recuperan con "+", que restaura el último color usado. Los cambios se aplican a todas las capas seleccionadas.
+
+- **Nuevas formas: triángulo y polígono**
+  El menú de formas ofrece Rectángulo, Elipse, Triángulo, Polígono y Estrella. El polígono permite elegir de 3 a 12 lados, y la estrella, el número de puntas y el tamaño del radio interior. Triángulos y polígonos ocupan todo el recuadro de la capa.
+
+- **Puntos de control arrastrables en la gráfica de la curva**
+  Los puntos azules de la gráfica ahora modifican la curva al arrastrarlos. Cada curva muestra solo los puntos que tienen sentido: ninguno en Linear, uno en Ease in y Ease out, dos en Ease in-out, Back in, Back out y en las curvas Bézier personalizadas. En Spring, el punto marca el primer rebote: su altura ajusta cuánto se pasa del final y su posición, la velocidad de la oscilación (la rigidez y la fricción se recalculan solas). En Bounce, la altura del punto ajusta la elasticidad y su posición elige el número de rebotes. La escala de la gráfica se adapta a la curva, para que los rebotes y las anticipaciones nunca queden fuera, y se mantiene fija mientras se arrastra. Cada arrastre se deshace en un solo paso.
+
+- **Curva "Personalizada"**
+  Al editar cualquier parámetro de una curva (arrastrando un punto, escribiendo un valor o arrastrando la etiqueta de un campo), la curva pasa a "Personalizada" y la curva base conserva sus valores predeterminados. Elegir de nuevo una curva de la lista restablece sus valores originales; elegir "Personalizada" crea una copia editable de la curva actual.
+
+- **Nuevas curvas: Ease in, Ease out, Back in y Back out**
+  Ease in arranca lento y acelera, Ease out arranca rápido y frena, Back in toma impulso hacia atrás antes de avanzar y Back out se pasa del valor final y regresa.
+
+- **Parámetros de Bounce**
+  La curva Bounce ahora tiene campos para el número de rebotes (1 a 8) y la elasticidad. Con los valores predeterminados, la curva es idéntica a la anterior.
+
+- **Equivalente CSS de las curvas Bézier**
+  Debajo de los campos X1, Y1, X2 e Y2 se muestra la curva como `cubic-bezier(…)`, lista para copiar. Los campos también se ajustan arrastrando su etiqueta.
+
+### Changed
+
+- **Herramientas de la barra superior**
+  Se quitaron la herramienta de texto y la forma Cápsula. Los proyectos que ya las usan, y los textos de los SVG importados, se siguen mostrando y exportando igual.
+
+- **Rectángulo sin esquinas redondeadas**
+  Las formas nuevas se crean con esquinas rectas, relleno azul y sin trazo.
+
+- **Animación entre un color y "sin color"**
+  Al animar un relleno o un trazo desde o hacia "sin color", el color se desvanece manteniendo su tono, en lugar de pasar por negro o cambiar de golpe.
+
+- **Selector de curva como menú desplegable**
+  El selector de la curva de suavizado es un menú desplegable, con el mismo componente que el selector de zoom. Cada opción muestra una miniatura de la curva y el orden es: Linear, Ease in, Ease out, Ease in-out, Back in, Back out, Bounce, Spring y Personalizada.
+
+- **Linear como curva predeterminada**
+  Los fotogramas clave nuevos usan la curva Linear en lugar de Spring.
+
+- **Botón Test con previsualización real**
+  Test reproduce la animación al ritmo de la curva y con la duración real del tramo seleccionado (del fotograma clave al siguiente). Un objeto se desplaza en una pista bajo la gráfica, incluidos los rebotes y las anticipaciones, mientras un punto verde recorre la curva. Durante la reproducción, el botón cambia a Stop.
+
+- **Menú de zoom**
+  El menú de zoom ahora se cierra al hacer clic fuera de él o al pulsar Esc.
+
+### Fixed
+
+- **Muestra de color completa**
+  La muestra de color del relleno, del trazo y del fondo del lienzo se rellena entera, sin el margen que dejaba el selector nativo. Los colores con transparencia se ven sobre un patrón de cuadros, y "sin color" se indica con una diagonal roja.
+
+- **Animación de parámetros sin valor inicial**
+  Un parámetro animado que la capa todavía no tenía guardado, como el punto de anclaje o el desenfoque, ahora se anima correctamente.
+
+- **Gráficas de Bounce y Spring sin picos**
+  La gráfica de Bounce se dibuja con arcos parabólicos exactos y la de Spring con muchas más muestras, así que ambas se ven curvas y suaves en lugar de formar picos entre puntos.
+
+- **Final de los resortes suaves**
+  Un resorte con poca fricción que seguía oscilando al final del tramo saltaba de golpe al valor final en el último fotograma. Ahora la oscilación restante se desvanece suavemente en el último 20 % del tramo. Los resortes que ya se asentaban antes, como el predeterminado, no cambian.
+
 ## [0.2.0] — 2026-09-30
 
 ### Added

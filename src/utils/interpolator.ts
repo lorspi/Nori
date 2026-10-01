@@ -1,13 +1,23 @@
-import { EasingConfig, Keyframe, Layer, Project } from '../types/animation';
+import { interpolatePath, isPathString } from './pathGeometry';
+import { BounceConfig, CubicBezierConfig, EasingConfig, Keyframe, Layer, SpringConfig } from '../types/animation';
 
-// Default Bezier presets
+// Control points of the Bézier-based built-in curves
 export const BEZIER_PRESETS = {
-  linear: { x1: 0, y1: 0, x2: 1, y2: 1 },
-  easeIn: { x1: 0.42, y1: 0, x2: 1, y2: 1 },
-  easeOut: { x1: 0, y1: 0, x2: 0.58, y2: 1 },
-  easeInOut: { x1: 0.42, y1: 0, x2: 0.58, y2: 1 },
-  anticipate: { x1: 0.36, y1: 0, x2: 0.66, y2: -0.56 },
-};
+  'ease-in': { x1: 0.42, y1: 0, x2: 1, y2: 1 },
+  'ease-out': { x1: 0, y1: 0, x2: 0.58, y2: 1 },
+  'ease-in-out': { x1: 0.42, y1: 0, x2: 0.58, y2: 1 },
+  'back-in': { x1: 0.36, y1: 0, x2: 0.66, y2: -0.56 },
+  'back-out': { x1: 0.34, y1: 1.56, x2: 0.64, y2: 1 },
+} satisfies Record<string, CubicBezierConfig>;
+
+export const DEFAULT_SPRING: SpringConfig = { stiffness: 270.18, damping: 13.2, mass: 1 };
+// Same shape as the classic easeOutBounce (3 bounces, each half as fast as the previous one)
+export const DEFAULT_BOUNCE: BounceConfig = { bounces: 3, restitution: 0.5 };
+
+// Normalized progress 0..1 maps to this many seconds of spring simulation
+export const SPRING_TIME_SCALE = 3.5;
+// From this progress on, any oscillation left is faded out so the curve lands on 1 smoothly
+const SPRING_FADE_START = 0.8;
 
 /**
  * Solve cubic bezier curve x(t) for parameter t, then evaluate y(t) with guaranteed convergence
@@ -20,9 +30,9 @@ export function solveCubicBezier(x1: number, y1: number, x2: number, y2: number,
   let upper = 1;
   let u = t;
 
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 12; i++) {
     const currentX = 3 * (1 - u) * (1 - u) * u * x1 + 3 * (1 - u) * u * u * x2 + u * u * u;
-    if (Math.abs(currentX - t) < 1e-4) break;
+    if (Math.abs(currentX - t) < 1e-5) break;
 
     if (currentX < t) {
       lower = u;
@@ -48,9 +58,18 @@ export function solveCubicBezier(x1: number, y1: number, x2: number, y2: number,
   return 3 * (1 - u) * (1 - u) * u * y1 + 3 * (1 - u) * u * u * y2 + u * u * u;
 }
 
+// Physical constants of a spring, clamped to safe ranges
+export function getSpringPhysics({ stiffness, damping, mass }: SpringConfig) {
+  const m = Math.max(0.01, mass);
+  const k = Math.max(1, stiffness);
+  const c = Math.max(0.1, damping);
+  const w0 = Math.sqrt(k / m);
+  const zeta = c / (2 * Math.sqrt(m * k));
+  return { m, k, c, w0, zeta };
+}
+
 /**
  * Damped harmonic oscillator simulation for Spring physics
- * Exactly what Nori uses for its spring curve editor!
  */
 export function evaluateSpring(
   stiffness: number,
@@ -59,51 +78,95 @@ export function evaluateSpring(
   t: number
 ): number {
   if (t <= 0) return 0;
-  const m = Math.max(0.01, mass);
-  const k = Math.max(1, stiffness);
-  const c = Math.max(0.1, damping);
+  if (t >= 1) return 1;
+  const { w0, zeta } = getSpringPhysics({ stiffness, damping, mass });
+  const scaledT = t * SPRING_TIME_SCALE;
 
-  const w0 = Math.sqrt(k / m);
-  const zeta = c / (2 * Math.sqrt(m * k));
-
-  // Time scaling so animation completes within ~1.0 normalized progress
-  const timeScale = 3.5;
-  const scaledT = t * timeScale;
-
+  // Remaining distance to the target (1 - value)
+  let offset: number;
   if (zeta < 1) {
     // Underdamped (springy overshoot)
     const wd = w0 * Math.sqrt(1 - zeta * zeta);
     const decay = Math.exp(-zeta * w0 * scaledT);
-    const envelope = Math.cos(wd * scaledT) + (zeta / Math.sqrt(1 - zeta * zeta)) * Math.sin(wd * scaledT);
-    return 1 - decay * envelope;
+    offset = decay * (Math.cos(wd * scaledT) + (zeta / Math.sqrt(1 - zeta * zeta)) * Math.sin(wd * scaledT));
   } else if (Math.abs(zeta - 1) < 1e-4) {
     // Critically damped
-    const decay = Math.exp(-w0 * scaledT);
-    return 1 - decay * (1 + w0 * scaledT);
+    offset = Math.exp(-w0 * scaledT) * (1 + w0 * scaledT);
   } else {
     // Overdamped
     const s1 = -w0 * (zeta - Math.sqrt(zeta * zeta - 1));
     const s2 = -w0 * (zeta + Math.sqrt(zeta * zeta - 1));
     const c1 = s2 / (s2 - s1);
     const c2 = -s1 / (s2 - s1);
-    return 1 - (c1 * Math.exp(s1 * scaledT) + c2 * Math.exp(s2 * scaledT));
+    offset = c1 * Math.exp(s1 * scaledT) + c2 * Math.exp(s2 * scaledT);
   }
+
+  // Soft springs may still be moving at the end of the segment: fade the rest out
+  // (cosine window, flat at both ends) instead of jumping to the target on the last frame
+  if (t > SPRING_FADE_START) {
+    const f = (t - SPRING_FADE_START) / (1 - SPRING_FADE_START);
+    offset *= 0.5 * (1 + Math.cos(Math.PI * f));
+  }
+  return 1 - offset;
+}
+
+export interface BounceSegment {
+  start: number;  // progress where the segment starts
+  end: number;    // progress where it lands on the target
+  height: number; // how far it rises back from the target (0..1); the first segment is the fall
 }
 
 /**
- * Bounce easing
+ * Bounce as a falling ball: a fall from 0 to 1 followed by `bounces` parabolic arches,
+ * each keeping `restitution` of the previous speed. Every segment is an exact parabola,
+ * so the graph can be drawn with quadratic curves.
  */
-function evaluateBounce(t: number): number {
-  const n1 = 7.5625;
-  const d1 = 2.75;
-  if (t < 1 / d1) {
-    return n1 * t * t;
-  } else if (t < 2 / d1) {
-    return n1 * (t -= 1.5 / d1) * t + 0.75;
-  } else if (t < 2.5 / d1) {
-    return n1 * (t -= 2.25 / d1) * t + 0.9375;
-  } else {
-    return n1 * (t -= 2.625 / d1) * t + 0.984375;
+export function getBounceSegments({ bounces, restitution }: BounceConfig): BounceSegment[] {
+  const n = Math.max(1, Math.min(8, Math.round(bounces)));
+  const e = Math.max(0.05, Math.min(0.9, restitution));
+  let total = 1;
+  for (let i = 1; i <= n; i++) total += 2 * Math.pow(e, i);
+  const fall = 1 / total;
+
+  const segments: BounceSegment[] = [{ start: 0, end: fall, height: 1 }];
+  let start = fall;
+  for (let i = 1; i <= n; i++) {
+    const duration = 2 * fall * Math.pow(e, i);
+    segments.push({ start, end: i === n ? 1 : start + duration, height: Math.pow(e, 2 * i) });
+    start += duration;
+  }
+  return segments;
+}
+
+export function evaluateBounce(config: BounceConfig, t: number): number {
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  const segments = getBounceSegments(config);
+  const fall = segments[0];
+  if (t < fall.end) return (t / fall.end) * (t / fall.end);
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i];
+    if (t < seg.end || i === segments.length - 1) {
+      const s = (t - seg.start) / (seg.end - seg.start);
+      return 1 - seg.height * 4 * s * (1 - s);
+    }
+  }
+  return 1;
+}
+
+// Control points of the curve when it is a cubic Bézier (null for linear, spring and bounce)
+export function getEasingBezier(easing: EasingConfig): CubicBezierConfig | null {
+  switch (easing.type) {
+    case 'ease-in':
+    case 'ease-out':
+    case 'ease-in-out':
+    case 'back-in':
+    case 'back-out':
+      return BEZIER_PRESETS[easing.type];
+    case 'bezier':
+      return easing.bezier;
+    default:
+      return null;
   }
 }
 
@@ -117,21 +180,8 @@ export function evaluateEasing(easing: EasingConfig, t: number): number {
   switch (easing.type) {
     case 'linear':
       return t;
-    case 'ease-in':
-      return solveCubicBezier(0.42, 0, 1, 1, t);
-    case 'ease-out':
-      return solveCubicBezier(0, 0, 0.58, 1, t);
-    case 'ease-in-out':
-      return solveCubicBezier(0.42, 0, 0.58, 1, t);
-    case 'bezier':
-      return solveCubicBezier(
-        easing.bezier.x1,
-        easing.bezier.y1,
-        easing.bezier.x2,
-        easing.bezier.y2,
-        t
-      );
     case 'spring':
+    case 'custom-spring':
       return evaluateSpring(
         easing.spring.stiffness,
         easing.spring.damping,
@@ -139,9 +189,13 @@ export function evaluateEasing(easing: EasingConfig, t: number): number {
         t
       );
     case 'bounce':
-      return evaluateBounce(t);
-    default:
-      return t;
+      return evaluateBounce(DEFAULT_BOUNCE, t);
+    case 'custom-bounce':
+      return evaluateBounce(easing.bounce ?? DEFAULT_BOUNCE, t);
+    default: {
+      const b = getEasingBezier(easing);
+      return b ? solveCubicBezier(b.x1, b.y1, b.x2, b.y2, t) : t;
+    }
   }
 }
 
@@ -189,9 +243,14 @@ export function parseColor(color: string): RGBA {
   return { r: 0, g: 0, b: 0, a: 1 };
 }
 
+const isColorString = (v: string) => v.startsWith('#') || v.startsWith('rgb') || v === 'transparent';
+
 export function interpolateColor(color1: string, color2: string, progress: number): string {
   const c1 = parseColor(color1);
   const c2 = parseColor(color2);
+  // Fading from / to "no color" keeps the visible color's tint instead of passing through black
+  if (color1 === 'transparent' || !color1) Object.assign(c1, { r: c2.r, g: c2.g, b: c2.b });
+  if (color2 === 'transparent' || !color2) Object.assign(c2, { r: c1.r, g: c1.g, b: c1.b });
 
   const r = Math.round(c1.r + (c2.r - c1.r) * progress);
   const g = Math.round(c1.g + (c2.g - c1.g) * progress);
@@ -248,8 +307,11 @@ export function interpolateTrackValue(
       }
 
       if (typeof k1.value === 'string' && typeof k2.value === 'string') {
-        if (k1.value.startsWith('#') || k1.value.startsWith('rgb')) {
+        if (isColorString(k1.value) && isColorString(k2.value)) {
           return interpolateColor(k1.value, k2.value, smoothProgress);
+        }
+        if (isPathString(k1.value) && isPathString(k2.value)) {
+          return interpolatePath(k1.value, k2.value, smoothProgress);
         }
       }
 
@@ -268,14 +330,13 @@ export function getLayerPropertiesAtTime(layer: Layer, currentTime: number) {
 
   for (const track of layer.tracks) {
     const propName = track.property as keyof typeof result;
-    const baseVal = (result as Record<string, unknown>)[propName];
-    if (baseVal !== undefined) {
-      (result as Record<string, unknown>)[propName] = interpolateTrackValue(
-        track.keyframes,
-        baseVal as number | string,
-        currentTime
-      );
-    }
+    // Optional properties (anchor, blur…) may have no base value yet
+    const baseVal = (result as Record<string, unknown>)[propName] ?? 0;
+    (result as Record<string, unknown>)[propName] = interpolateTrackValue(
+      track.keyframes,
+      baseVal as number | string,
+      currentTime
+    );
   }
 
   return result;

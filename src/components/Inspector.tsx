@@ -1,20 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Clock,
   Sliders,
-  Play,
   Lock,
   LockOpen as Unlock,
   Trash as Trash2,
   Copy,
   Crosshair,
   Diamond,
+  Minus,
+  Plus,
+  PencilSimple,
+  Polygon as PolygonIcon,
 } from '@phosphor-icons/react';
+import { ColorSwatch, isNoColor } from './ColorSwatch';
+import { DEFAULT_SHAPE } from '../utils/pathGeometry';
 import { Layer, Project, EasingConfig, AnimatableProperty, KeyframeRef } from '../types/animation';
 import { ScrubLabel } from './ScrubLabel';
-import { evaluateEasing, getLayerPropertiesAtTime } from '../utils/interpolator';
+import { getLayerPropertiesAtTime } from '../utils/interpolator';
+import { CurveEditor } from './CurveEditor';
 import {
   PROPERTY_META,
+  createDefaultEasing,
   frameTolerance,
   getLayerKeyframeRange,
   isAnimatableProperty,
@@ -28,11 +35,14 @@ interface InspectorProps {
   selectedLayerIds: string[];
   selectedKeyframes: KeyframeRef[];
   onUpdateLayerProperty: (layerId: string | string[], property: string, value: any, recordUndo?: boolean) => void;
-  onUpdateLayerProperties: (layerId: string, properties: Partial<Layer['properties']>, recordUndo?: boolean) => void;
+  onUpdateLayerProperties: (layerId: string | string[], properties: Partial<Layer['properties']>, recordUndo?: boolean) => void;
   onRenameLayer: (layerId: string, name: string) => void;
   // Records one undo step before a label drag (scrub) starts
   onStartScrub: () => void;
   onToggleAnimation: (layerId: string, properties: AnimatableProperty[]) => void;
+  // Vertex editing (basic shapes are converted to a path first)
+  vertexEditLayerId: string | null;
+  onToggleVertexEdit: (layerId: string) => void;
   onUpdateKeyframesEasing: (refs: KeyframeRef[], easing: EasingConfig, recordUndo?: boolean) => void;
   onUpdateProjectSettings: (settings: Partial<Project>, recordUndo?: boolean) => void;
   onDeleteLayer: (layerId: string) => void;
@@ -88,6 +98,8 @@ export const Inspector: React.FC<InspectorProps> = ({
   onRenameLayer,
   onStartScrub,
   onToggleAnimation,
+  vertexEditLayerId,
+  onToggleVertexEdit,
   onUpdateKeyframesEasing,
   onUpdateProjectSettings,
   onDeleteLayer,
@@ -95,8 +107,8 @@ export const Inspector: React.FC<InspectorProps> = ({
   currentTime,
 }) => {
   const [aspectLocked, setAspectLocked] = useState(true);
-  const [previewProgress, setPreviewProgress] = useState(0);
-  const [isPreviewRunning, setIsPreviewRunning] = useState(false);
+  // Last color of each removed fill / stroke, restored when it's added back
+  const lastColors = useRef<Record<string, string>>({});
 
   // The curve editor works on the selected keyframes only (never on an implicit fallback),
   // showing the first one's curve and applying edits to all of them
@@ -112,191 +124,15 @@ export const Inspector: React.FC<InspectorProps> = ({
       ? `${selection.length} fotogramas clave`
       : `${isAnimatableProperty(primary.track.property) ? PROPERTY_META[primary.track.property].label : primary.track.label} · ${primary.keyframe.time.toFixed(2)}s`;
 
-  const currentEasing: EasingConfig = primary?.keyframe.easing || {
-    type: 'spring',
-    bezier: { x1: 0.25, y1: 1, x2: 0.5, y2: 1 },
-    spring: { stiffness: 270.18, damping: 13.2, mass: 1 },
-  };
+  const currentEasing: EasingConfig = primary?.keyframe.easing ?? createDefaultEasing();
 
-  // Preview animation loop for testing value curve in real-time
-  useEffect(() => {
-    let animId: number;
-    let startTime: number | null = null;
-    const duration = 1200; // ms
-
-    if (isPreviewRunning) {
-      const loop = (timestamp: number) => {
-        if (!startTime) startTime = timestamp;
-        const elapsed = timestamp - startTime;
-        const t = Math.min(1, elapsed / duration);
-        setPreviewProgress(t);
-
-        if (t < 1) {
-          animId = requestAnimationFrame(loop);
-        } else {
-          setTimeout(() => {
-            setIsPreviewRunning(false);
-            setPreviewProgress(0);
-          }, 300);
-        }
-      };
-      animId = requestAnimationFrame(loop);
-    }
-
-    return () => cancelAnimationFrame(animId);
-  }, [isPreviewRunning]);
+  // Length of the animated segment that starts at the selected keyframe (for the Test preview)
+  const nextKeyframe = primary?.track.keyframes.find((k) => k.time > primary.keyframe.time + 1e-6);
+  const previewDuration = primary && nextKeyframe ? nextKeyframe.time - primary.keyframe.time : 1;
 
   const applyEasing = (easing: EasingConfig, recordUndo = true) => {
     if (selectionRefs.length === 0) return;
     onUpdateKeyframesEasing(selectionRefs, easing, recordUndo);
-  };
-
-  const handleEasingTypeChange = (type: EasingConfig['type']) => {
-    applyEasing({ ...currentEasing, type });
-  };
-
-  const handleSpringParamChange = (param: 'stiffness' | 'damping' | 'mass', val: number, recordUndo = true) => {
-    applyEasing({
-      ...currentEasing,
-      type: 'spring',
-      spring: {
-        ...currentEasing.spring,
-        [param]: Math.max(0.1, val),
-      },
-    }, recordUndo);
-  };
-
-  const handleBezierParamChange = (param: 'x1' | 'y1' | 'x2' | 'y2', val: number) => {
-    applyEasing({
-      ...currentEasing,
-      type: 'bezier',
-      bezier: {
-        ...currentEasing.bezier,
-        [param]: val,
-      },
-    });
-  };
-
-  // Render SVG Path for the Value Curve Editor Graph (Nori value curve editor)
-  const renderCurveGraph = () => {
-    const width = 230;
-    const height = 120;
-    const padding = 16;
-    const graphW = width - padding * 2;
-    const graphH = height - padding * 2;
-
-    const points: { x: number; y: number }[] = [];
-    const samples = 40;
-
-    for (let i = 0; i <= samples; i++) {
-      const t = i / samples;
-      const easedY = evaluateEasing(currentEasing, t);
-      // Map x: [0, 1] -> [padding, padding + graphW]
-      // Map y: [0, 1] -> [padding + graphH, padding] (inverted for SVG canvas, with headroom for overshoot)
-      const x = padding + t * graphW;
-      const y = padding + graphH - (easedY * (graphH * 0.75));
-      points.push({ x, y });
-    }
-
-    const pathData = points.reduce((acc, pt, idx) => {
-      return idx === 0 ? `M ${pt.x},${pt.y}` : `${acc} L ${pt.x},${pt.y}`;
-    }, '');
-
-    // Current position of preview test ball
-    const previewEased = evaluateEasing(currentEasing, previewProgress);
-    const ballX = padding + previewProgress * graphW;
-    const ballY = padding + graphH - (previewEased * (graphH * 0.75));
-
-    return (
-      <div className="relative bg-secondary rounded-lg p-2 border border-border my-2">
-        <svg width={width} height={height} className="w-full h-auto overflow-visible">
-          {/* Subtle grid background */}
-          <line
-            x1={padding}
-            y1={padding + graphH * 0.25}
-            x2={padding + graphW}
-            y2={padding + graphH * 0.25}
-            className="stroke-border"
-            strokeDasharray="2,3"
-          />
-          <line
-            x1={padding}
-            y1={padding + graphH}
-            x2={padding + graphW}
-            y2={padding + graphH}
-            className="stroke-border"
-          />
-
-          {/* Reference baseline and target 100% line */}
-          <line
-            x1={padding}
-            y1={padding + graphH - graphH * 0.75}
-            x2={padding + graphW}
-            y2={padding + graphH - graphH * 0.75}
-            className="stroke-muted-foreground/40"
-            strokeDasharray="3,3"
-          />
-
-          {/* Curve glow and line (Crisp white with overshoot) */}
-          <path
-            d={pathData}
-            fill="none"
-            className="stroke-foreground"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-
-          {/* Start and End Keyframe Diamond Handles */}
-          <rect
-            x={padding - 4}
-            y={padding + graphH - 4}
-            width="8"
-            height="8"
-            className="fill-card stroke-bento-blue"
-            strokeWidth="1.5"
-            transform={`rotate(45 ${padding} ${padding + graphH})`}
-          />
-          <rect
-            x={padding + graphW - 4}
-            y={padding + graphH - graphH * 0.75 - 4}
-            width="8"
-            height="8"
-            className="fill-card stroke-bento-blue"
-            strokeWidth="1.5"
-            transform={`rotate(45 ${padding + graphW} ${padding + graphH - graphH * 0.75})`}
-          />
-
-          {/* Dynamic Interactive Blue Handle Indicator */}
-          <circle
-            cx={padding + graphW * 0.35}
-            cy={padding + graphH - graphH * 0.45}
-            r="4"
-            className="fill-bento-blue"
-          />
-
-          {/* Live Preview Test Ball */}
-          {isPreviewRunning && (
-            <circle
-              cx={ballX}
-              cy={ballY}
-              r="5"
-              className="fill-bento-green stroke-card transition-all"
-              strokeWidth="1.5"
-            />
-          )}
-        </svg>
-
-        {/* Live Test Curve Button */}
-        <button
-          onClick={() => setIsPreviewRunning(true)}
-          className="absolute top-2 right-2 p-1 rounded-md bg-card border border-border hover:bg-accent text-foreground transition-colors flex items-center gap-1 text-[10px]"
-          title="Probar suavizado en vivo"
-        >
-          <Play className="w-2.5 h-2.5 text-bento-green" />
-          <span>Test</span>
-        </button>
-      </div>
-    );
   };
 
   // If no layer selected, show project settings
@@ -396,11 +232,10 @@ export const Inspector: React.FC<InspectorProps> = ({
           <div>
             <label className="text-muted-foreground block mb-1">Fondo del Lienzo</label>
             <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={project.backgroundColor.startsWith('#') ? project.backgroundColor : '#ffffff'}
-                onChange={(e) => onUpdateProjectSettings({ backgroundColor: e.target.value })}
-                className="w-7 h-7 rounded-md border border-border bg-transparent cursor-pointer"
+              <ColorSwatch
+                value={project.backgroundColor}
+                onChange={(color) => onUpdateProjectSettings({ backgroundColor: color })}
+                title="Color de fondo"
               />
               <input
                 type="text"
@@ -453,6 +288,99 @@ export const Inspector: React.FC<InspectorProps> = ({
       >
         <Diamond className="w-3 h-3" weight={isAnimated && hasKeyAtCurrent ? 'fill' : isAnimated ? 'bold' : 'regular'} />
       </button>
+    );
+  };
+
+  // Color row: swatch, hex value and a button to remove or add the color back.
+  // Changes apply to every selected layer when this layer is part of the selection.
+  const renderPaintRow = (prop: 'fill' | 'stroke', defaultColor: string, emptyLabel: string) => {
+    const value = p[prop];
+    const none = isNoColor(value);
+    const key = `${layerId}:${prop}`;
+    const setColor = (color: string) => {
+      const changes: Partial<Layer['properties']> = { [prop]: color };
+      // A stroke that is added back needs a visible width
+      if (prop === 'stroke' && !isNoColor(color) && !(p.strokeWidth > 0)) changes.strokeWidth = 2;
+      onUpdateLayerProperties(fillTargets, changes);
+    };
+    return (
+      <div className="flex items-center gap-1.5">
+        <ColorSwatch value={value} onChange={setColor} title={prop === 'fill' ? 'Color de relleno' : 'Color del trazo'} />
+        <input
+          type="text"
+          value={none ? '' : value}
+          placeholder={emptyLabel}
+          onChange={(e) => setColor(e.target.value.trim() || 'transparent')}
+          className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground placeholder:text-muted-foreground"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            if (none) {
+              setColor(lastColors.current[key] ?? defaultColor);
+            } else {
+              lastColors.current[key] = value;
+              setColor('transparent');
+            }
+          }}
+          className="p-1.5 rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
+          title={none ? (prop === 'fill' ? 'Añadir relleno' : 'Añadir trazo') : prop === 'fill' ? 'Quitar relleno' : 'Quitar trazo'}
+        >
+          {none ? <Plus className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+        </button>
+      </div>
+    );
+  };
+
+  // Numeric field with a draggable label (Figma style)
+  const renderNumberField = (
+    prop: 'sides' | 'points' | 'innerRadius' | 'radius' | 'blur',
+    label: string,
+    shown: number,
+    opts: {
+      min?: number;
+      max?: number;
+      step?: number;
+      unit?: string;
+      round?: boolean;
+      title?: string;
+      toValue?: (v: number) => number;
+    } = {}
+  ) => {
+    const { min, max, step = 1, unit, round, title, toValue = (v: number) => v } = opts;
+    const toStored = (v: number) => {
+      let next = round ? Math.round(v) : v;
+      if (min !== undefined) next = Math.max(min, next);
+      if (max !== undefined) next = Math.min(max, next);
+      return toValue(next);
+    };
+    return (
+      <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1" title={title}>
+        <ScrubLabel
+          value={shown}
+          step={step}
+          min={min}
+          max={max}
+          onScrubStart={onStartScrub}
+          onChange={(v) => onUpdateLayerProperty(layerId, prop, toStored(v), false)}
+          className="text-muted-foreground text-[10px] whitespace-nowrap"
+        >
+          {label}
+        </ScrubLabel>
+        <input
+          type="number"
+          min={min}
+          max={max}
+          value={shown}
+          onChange={(e) => {
+            if (e.target.value === '') return;
+            onUpdateLayerProperty(layerId, prop, toStored(Number(e.target.value)));
+          }}
+          className="w-full min-w-0 bg-transparent text-right font-mono text-foreground focus:outline-none"
+          aria-label={label}
+        />
+        {unit && <span className="text-muted-foreground font-mono text-[10px]">{unit}</span>}
+      </div>
     );
   };
 
@@ -541,130 +469,12 @@ export const Inspector: React.FC<InspectorProps> = ({
               Los fotogramas seleccionados tienen curvas distintas; al editar se aplicará esta a todos.
             </p>
           )}
-          {/* Easing Type Selector */}
-          <div className="flex items-center gap-1 p-0.5 bg-secondary border border-border rounded-md mb-2">
-            {(['spring', 'bezier', 'ease-in-out', 'bounce', 'linear'] as const).map((type) => (
-              <button
-                key={type}
-                onClick={() => handleEasingTypeChange(type)}
-                className={`flex-1 py-1 text-[10px] font-medium rounded-md capitalize transition-colors ${
-                  currentEasing.type === type
-                    ? 'bg-bento-blue text-white shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {type === 'bezier' ? 'Bézier' : type}
-              </button>
-            ))}
-          </div>
-
-          {/* The Visual Curve Graph */}
-          {renderCurveGraph()}
-
-          {/* Spring Physics Parameters (Stiffness, Damping, Mass) */}
-          {currentEasing.type === 'spring' && (
-            <div className="space-y-1.5 font-mono text-[11px] bg-secondary border border-border rounded-md p-2">
-              <div className="flex items-center justify-between">
-                <ScrubLabel
-                  value={currentEasing.spring.stiffness}
-                  onScrubStart={onStartScrub}
-                  onChange={(v) => handleSpringParamChange('stiffness', v, false)}
-                  className="text-muted-foreground"
-                >
-                  Stiffness (Rigidez)
-                </ScrubLabel>
-                <input
-                  type="number"
-                  step="5"
-                  value={currentEasing.spring.stiffness}
-                  onChange={(e) => handleSpringParamChange('stiffness', Number(e.target.value))}
-                  className="w-16 bg-card border border-border rounded-md px-1.5 py-0.5 text-right text-foreground"
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <ScrubLabel
-                  value={currentEasing.spring.damping}
-                  step={0.1}
-                  onScrubStart={onStartScrub}
-                  onChange={(v) => handleSpringParamChange('damping', v, false)}
-                  className="text-muted-foreground"
-                >
-                  Damping (Fricción)
-                </ScrubLabel>
-                <input
-                  type="number"
-                  step="0.5"
-                  value={currentEasing.spring.damping}
-                  onChange={(e) => handleSpringParamChange('damping', Number(e.target.value))}
-                  className="w-16 bg-card border border-border rounded-md px-1.5 py-0.5 text-right text-foreground"
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <ScrubLabel
-                  value={currentEasing.spring.mass}
-                  step={0.01}
-                  min={0.1}
-                  onScrubStart={onStartScrub}
-                  onChange={(v) => handleSpringParamChange('mass', v, false)}
-                  className="text-muted-foreground"
-                >
-                  Mass (Masa)
-                </ScrubLabel>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  value={currentEasing.spring.mass}
-                  onChange={(e) => handleSpringParamChange('mass', Number(e.target.value))}
-                  className="w-16 bg-card border border-border rounded-md px-1.5 py-0.5 text-right text-foreground"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Cubic Bezier Handles if Bezier is selected */}
-          {currentEasing.type === 'bezier' && (
-            <div className="grid grid-cols-2 gap-2 font-mono text-[11px] bg-secondary border border-border rounded-md p-2">
-              <div>
-                <span className="text-muted-foreground block mb-0.5">X1, Y1</span>
-                <div className="flex gap-1">
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={currentEasing.bezier.x1}
-                    onChange={(e) => handleBezierParamChange('x1', Number(e.target.value))}
-                    className="w-full bg-card border border-border rounded-md px-1 py-0.5 text-foreground"
-                  />
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={currentEasing.bezier.y1}
-                    onChange={(e) => handleBezierParamChange('y1', Number(e.target.value))}
-                    className="w-full bg-card border border-border rounded-md px-1 py-0.5 text-foreground"
-                  />
-                </div>
-              </div>
-              <div>
-                <span className="text-muted-foreground block mb-0.5">X2, Y2</span>
-                <div className="flex gap-1">
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={currentEasing.bezier.x2}
-                    onChange={(e) => handleBezierParamChange('x2', Number(e.target.value))}
-                    className="w-full bg-card border border-border rounded-md px-1 py-0.5 text-foreground"
-                  />
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={currentEasing.bezier.y2}
-                    onChange={(e) => handleBezierParamChange('y2', Number(e.target.value))}
-                    className="w-full bg-card border border-border rounded-md px-1 py-0.5 text-foreground"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
+          <CurveEditor
+            easing={currentEasing}
+            onChange={applyEasing}
+            onStartScrub={onStartScrub}
+            previewDuration={previewDuration}
+          />
           </>
           )}
         </div>
@@ -884,6 +694,90 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
         </div>
 
+        {/* Shape geometry & vertices */}
+        {selectedLayer.type !== 'text' && (
+          <div className="pt-2 border-t border-border space-y-2">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
+              Forma
+            </span>
+
+            {selectedLayer.type === 'polygon' &&
+              renderNumberField('sides', 'Lados', p.sides ?? DEFAULT_SHAPE.sides, { min: 3, max: 12, step: 0.1, round: true })}
+            {selectedLayer.type === 'star' && (
+              <div className="grid grid-cols-2 gap-2">
+                {renderNumberField('points', 'Puntas', p.points ?? DEFAULT_SHAPE.points, { min: 3, max: 12, step: 0.1, round: true })}
+                {renderNumberField('innerRadius', 'Interior', Math.round((p.innerRadius ?? DEFAULT_SHAPE.innerRadius) * 100), {
+                  min: 5,
+                  max: 100,
+                  unit: '%',
+                  toValue: (v) => v / 100,
+                  title: 'Radio interior respecto al exterior',
+                })}
+              </div>
+            )}
+
+            {['rect', 'polygon', 'star'].includes(selectedLayer.type) && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-muted-foreground font-medium">Esquinas redondeadas</span>
+                  {renderAnimToggle(['radius'], 'radio de esquinas')}
+                </div>
+                {renderNumberField('radius', 'Radio', Math.round(p.radius || 0), { min: 0, max: 1000, unit: 'px' })}
+              </div>
+            )}
+
+            {/* Vertex editing / shape animation */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground font-medium">Vértices</span>
+                {selectedLayer.type === 'path' && renderAnimToggle(['pathData'], 'forma')}
+              </div>
+              <button
+                type="button"
+                onClick={() => onToggleVertexEdit(layerId)}
+                className={`w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md border text-[11px] font-medium transition-colors ${
+                  vertexEditLayerId === layerId
+                    ? 'bg-bento-blue text-white border-bento-blue'
+                    : 'bg-secondary border-border text-foreground hover:bg-accent'
+                }`}
+              >
+                {selectedLayer.type === 'path' ? (
+                  <PencilSimple className="w-3 h-3" />
+                ) : (
+                  <PolygonIcon className="w-3 h-3" />
+                )}
+                <span>
+                  {selectedLayer.type !== 'path'
+                    ? 'Convertir en trazado y editar vértices'
+                    : vertexEditLayerId === layerId
+                      ? 'Terminar edición'
+                      : 'Editar vértices'}
+                </span>
+              </button>
+              <p className="text-[10px] text-muted-foreground leading-snug">
+                {selectedLayer.type !== 'path'
+                  ? 'La forma pasa a ser un trazado con vértices editables.'
+                  : 'Arrastra los vértices en el lienzo (o haz doble clic en el trazado). Selecciona varios con un recuadro o Shift + clic, y muévelos con las flechas (Shift: 10 px). Activa el rombo para animar la forma: cada fotograma clave guarda la posición de los vértices.'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Effects */}
+        <div className="pt-2 border-t border-border space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Efectos</span>
+            {renderAnimToggle(['blur'], 'desenfoque')}
+          </div>
+          {renderNumberField('blur', 'Desenfoque', Number((p.blur || 0).toFixed(1)), {
+            min: 0,
+            max: 200,
+            step: 0.5,
+            unit: 'px',
+            title: 'Desenfoque gaussiano',
+          })}
+        </div>
+
         {/* Text Layer specific attributes */}
         {selectedLayer.type === 'text' && (
           <div className="pt-2 border-t border-border space-y-2">
@@ -931,27 +825,55 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
         )}
 
-        {/* Fill & Color Styling */}
+        {/* Fill & Stroke */}
         <div className="pt-2 border-t border-border space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Relleno y Trazo
-            </span>
-            {renderAnimToggle(['fill'], 'relleno')}
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
+            Relleno y Trazo
+          </span>
+
+          {/* Fill */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-muted-foreground font-medium">Relleno</span>
+              {renderAnimToggle(['fill'], 'relleno')}
+            </div>
+            {renderPaintRow('fill', '#0084ff', 'Sin relleno')}
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={p.fill.startsWith('#') ? p.fill : '#0084ff'}
-              onChange={(e) => onUpdateLayerProperty(fillTargets, 'fill', e.target.value)}
-              className="w-7 h-7 rounded-md border border-border bg-transparent cursor-pointer"
-            />
-            <input
-              type="text"
-              value={p.fill}
-              onChange={(e) => onUpdateLayerProperty(fillTargets, 'fill', e.target.value)}
-              className="flex-1 bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
-            />
+
+          {/* Stroke */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-muted-foreground font-medium">Trazo</span>
+              {renderAnimToggle(['stroke', 'strokeWidth'], 'trazo')}
+            </div>
+            {renderPaintRow('stroke', '#1a1d23', 'Sin trazo')}
+            <div
+              className={`flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1 ${
+                isNoColor(p.stroke) ? 'opacity-50' : ''
+              }`}
+            >
+              <ScrubLabel
+                value={p.strokeWidth || 0}
+                step={0.5}
+                min={0}
+                max={200}
+                onScrubStart={onStartScrub}
+                onChange={(v) => onUpdateLayerProperty(fillTargets, 'strokeWidth', v, false)}
+                className="text-muted-foreground text-[10px] whitespace-nowrap"
+              >
+                Grosor
+              </ScrubLabel>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={Number((p.strokeWidth || 0).toFixed(2))}
+                onChange={(e) => onUpdateLayerProperty(fillTargets, 'strokeWidth', Math.max(0, Number(e.target.value)))}
+                className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
+                title="Grosor del trazo"
+              />
+              <span className="text-muted-foreground font-mono text-[10px]">px</span>
+            </div>
           </div>
         </div>
       </div>

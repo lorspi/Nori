@@ -909,7 +909,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                     ? 'bg-white border-2 border-bento-blue shadow-md shadow-bento-blue/50'
                                     : 'bg-bento-blue border border-white'
                                 }`}
-                                title={`Tiempo: ${kf.time.toFixed(2)}s | Valor: ${kf.value}\nArrastrar para mover · Shift/Ctrl + clic para selección múltiple · Doble clic para borrar`}
+                                title={`Tiempo: ${kf.time.toFixed(2)}s | Valor: ${String(kf.value).length > 32 ? `${String(kf.value).slice(0, 32)}…` : kf.value}\nArrastrar para mover · Shift/Ctrl + clic para selección múltiple · Doble clic para borrar`}
                               />
                             );
                           })}

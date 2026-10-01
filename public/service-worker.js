@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nori-cache-0.2.0';
+const CACHE_NAME = 'nori-cache-0.3.0';
 const ASSETS = [
   '/',
   '/index.html',

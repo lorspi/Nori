@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Project,
   Layer,
+  LayerType,
   AnimatableProperty,
   EasingConfig,
   PropertyTrack,
@@ -10,7 +11,8 @@ import {
 } from './types/animation';
 import { NORI_INTRO_PROJECT } from './utils/noriIntro';
 import { loadLastProject, saveLastProject } from './utils/projectStorage';
-import { TopBar, ToolMode } from './components/TopBar';
+import { TopBar, ToolMode, ShapeType } from './components/TopBar';
+import { DEFAULT_SHAPE, getShapePathData, normalizePathData } from './utils/pathGeometry';
 import { CanvasView } from './components/CanvasView';
 import { Inspector } from './components/Inspector';
 import { Timeline } from './components/Timeline';
@@ -40,6 +42,8 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(() => !restoredProject);
   const [activeTool, setActiveTool] = useState<ToolMode>('select');
+  // Path layer whose vertices are being edited on the canvas
+  const [vertexEditLayerId, setVertexEditLayerId] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(1.0);
   const [showCheckerboard, setShowCheckerboard] = useState<boolean>(false);
 
@@ -311,7 +315,12 @@ export default function App() {
         } else if (selectedLayerIds.length > 0) {
           handleDeleteLayers(selectedLayerIds);
         }
-      } else if (e.code === 'Escape') {
+      } else if (e.code === 'Escape' || (e.code === 'Enter' && vertexEditLayerId)) {
+        // Leaving vertex editing keeps the layer selected
+        if (vertexEditLayerId) {
+          setVertexEditLayerId(null);
+          return;
+        }
         setSelectedLayerId(null);
         setSelectedKeyframes([]);
       }
@@ -319,7 +328,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [project.fps, project.duration, selectedKeyframes, selectedLayerId, selectedLayerIds, clipboard, currentTime, project, handleUndo, handleRedo, isAboutOpen]);
+  }, [project.fps, project.duration, selectedKeyframes, selectedLayerId, selectedLayerIds, clipboard, currentTime, project, handleUndo, handleRedo, isAboutOpen, vertexEditLayerId]);
 
   // Start an interactive drag action (records pre-drag snapshot once for complete undo)
   const handleStartDrag = useCallback(() => {
@@ -752,77 +761,48 @@ export default function App() {
     }));
   };
 
-  // Add New Layer
-  const handleAddLayer = (type: 'rect' | 'capsule' | 'ellipse' | 'star' | 'text') => {
+  // Add New Layer (basic shapes start with sharp corners, a fill and no stroke)
+  const handleAddLayer = (shape: ShapeType) => {
     recordHistory(project);
 
     const id = `layer_${Date.now()}`;
-    const centerX = Math.round(project.width / 2);
-    const centerY = Math.round(project.height / 2);
+    const type: LayerType = shape === 'triangle' ? 'polygon' : shape;
+    const count = project.layers.length + 1;
+    const names: Record<ShapeType, string> = {
+      rect: 'Rectángulo',
+      ellipse: 'Elipse',
+      triangle: 'Triángulo',
+      polygon: 'Polígono',
+      star: 'Estrella',
+    };
 
-    let newLayer: Layer;
-
-    if (type === 'text') {
-      newLayer = {
-        id,
-        name: `Text ${project.layers.length + 1}`,
-        type: 'text',
-        visible: true,
-        locked: false,
-        inTime: 0,
-        outTime: project.duration,
-        expanded: true,
-        properties: {
-          x: centerX,
-          y: centerY,
-          width: 320,
-          height: 60,
-          scaleX: 1,
-          scaleY: 1,
-          rotation: 0,
-          opacity: 1,
-          fill: '#ffffff',
-          stroke: 'transparent',
-          strokeWidth: 0,
-          radius: 0,
-          text: 'Nuevo Texto',
-          fontSize: 48,
-          fontWeight: '700',
-          fontFamily: 'Sen, sans-serif',
-        },
-        tracks: [],
-      };
-    } else {
-      const isCapsule = type === 'capsule';
-      const width = isCapsule ? 48 : 120;
-      const height = isCapsule ? 200 : 120;
-
-      newLayer = {
-        id,
-        name: `${type.charAt(0).toUpperCase() + type.slice(1)} ${project.layers.length + 1}`,
-        type,
-        visible: true,
-        locked: false,
-        inTime: 0,
-        outTime: project.duration,
-        expanded: true,
-        properties: {
-          x: centerX,
-          y: centerY,
-          width,
-          height,
-          scaleX: 1,
-          scaleY: 1,
-          rotation: 0,
-          opacity: 1,
-          fill: '#0084ff',
-          stroke: 'transparent',
-          strokeWidth: 0,
-          radius: isCapsule ? 24 : 16,
-        },
-        tracks: [],
-      };
-    }
+    const newLayer: Layer = {
+      id,
+      name: `${names[shape]} ${count}`,
+      type,
+      visible: true,
+      locked: false,
+      inTime: 0,
+      outTime: project.duration,
+      expanded: true,
+      properties: {
+        x: Math.round(project.width / 2),
+        y: Math.round(project.height / 2),
+        width: 120,
+        height: 120,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+        opacity: 1,
+        fill: '#0084ff',
+        stroke: 'transparent',
+        strokeWidth: 2,
+        radius: 0,
+        ...(type === 'polygon' ? { sides: shape === 'triangle' ? 3 : DEFAULT_SHAPE.sides } : {}),
+        ...(type === 'star' ? { points: DEFAULT_SHAPE.points, innerRadius: DEFAULT_SHAPE.innerRadius } : {}),
+      },
+      tracks: [],
+    };
 
     setProject((prev) => ({
       ...prev,
@@ -830,6 +810,43 @@ export default function App() {
     }));
     setSelectedLayerId(id);
     setActiveTool('select');
+  };
+
+  // Turn a basic shape into an editable path (its look at the current frame is kept)
+  const handleConvertToPath = (layerId: string) => {
+    const layer = project.layers.find((l) => l.id === layerId);
+    if (!layer || layer.type === 'path') return;
+    const current = getLayerPropertiesAtTime(layer, currentTime);
+    const d = getShapePathData(layer.type, current);
+    if (!d) return;
+
+    recordHistory(project);
+    setProject((prev) => ({
+      ...prev,
+      layers: prev.layers.map((l) =>
+        l.id !== layerId
+          ? l
+          : {
+              ...l,
+              type: 'path',
+              properties: { ...l.properties, pathData: normalizePathData(d), radius: 0 },
+              // The corner radius is now part of the outline
+              tracks: l.tracks.filter((t) => t.property !== 'radius'),
+            }
+      ),
+    }));
+    setSelectedKeyframes((prev) => prev.filter((r) => r.layerId !== layerId || r.property !== 'radius'));
+    setVertexEditLayerId(layerId);
+  };
+
+  const handleToggleVertexEdit = (layerId: string) => {
+    const layer = project.layers.find((l) => l.id === layerId);
+    if (!layer) return;
+    if (layer.type !== 'path') {
+      handleConvertToPath(layerId);
+      return;
+    }
+    setVertexEditLayerId((prev) => (prev === layerId ? null : layerId));
   };
 
   // Duplicate Layer
@@ -946,6 +963,13 @@ export default function App() {
 
   const selectedLayer = project.layers.find((l) => l.id === selectedLayerId) || null;
 
+  // Vertex editing ends when its layer is no longer the selected path
+  useEffect(() => {
+    if (!vertexEditLayerId) return;
+    const layer = project.layers.find((l) => l.id === vertexEditLayerId);
+    if (!layer || layer.type !== 'path' || selectedLayerId !== vertexEditLayerId) setVertexEditLayerId(null);
+  }, [vertexEditLayerId, selectedLayerId, project.layers]);
+
   return (
     <div className="flex flex-col h-screen w-screen bg-background text-foreground overflow-hidden select-none relative">
       {/* 1. Top Bar with Undo / Redo & Lottie JSON support */}
@@ -987,6 +1011,9 @@ export default function App() {
           onSelectLayers={handleSelectLayers}
           onUpdateLayerProperties={handleUpdateLayerProperties}
           onStartDragLayer={handleStartDrag}
+          vertexEditLayerId={vertexEditLayerId}
+          onToggleVertexEdit={handleToggleVertexEdit}
+          onExitVertexEdit={() => setVertexEditLayerId(null)}
           activeTool={activeTool}
           zoom={zoom}
           setZoom={setZoom}
@@ -1003,6 +1030,8 @@ export default function App() {
           onRenameLayer={handleRenameLayer}
           onStartScrub={handleStartDrag}
           onToggleAnimation={handleToggleAnimation}
+          vertexEditLayerId={vertexEditLayerId}
+          onToggleVertexEdit={handleToggleVertexEdit}
           onUpdateKeyframesEasing={handleUpdateKeyframesEasing}
           onUpdateProjectSettings={(settings, recordUndo = true) => {
             if (recordUndo) recordHistory(project);

@@ -7,7 +7,9 @@ import {
   getLayerWorldCorners,
   getSelectionHandles,
   getSelectionOutline,
+  layerLocalToWorld,
 } from './transformHandles';
+import { getLinkedSegments, getPathVertices, getShapePathData, parsePath } from './pathGeometry';
 
 export interface RenderOptions {
   scale?: number;
@@ -19,6 +21,11 @@ export interface RenderOptions {
   selectedLayerIds?: string[];
   showGuides?: boolean;
   zoom?: number;
+  // Path layer whose vertices are being edited (draws its points instead of the selection box)
+  vertexEditLayerId?: string | null;
+  // Selected vertices and the one under the cursor (segment indices)
+  selectedVertices?: number[];
+  hoverVertex?: number | null;
 }
 
 /**
@@ -47,6 +54,8 @@ const path2dCache = new Map<string, Path2D>();
 export function getCachedPath2D(pathData: string): Path2D {
   let cached = path2dCache.get(pathData);
   if (!cached) {
+    // Animated shapes create a new path on every frame: keep the cache bounded
+    if (path2dCache.size > 500) path2dCache.clear();
     cached = new Path2D(pathData);
     path2dCache.set(pathData, cached);
   }
@@ -88,10 +97,34 @@ export function renderLayer(
   }
   ctx.globalAlpha = Math.max(0, Math.min(1, p.opacity ?? 1));
 
-  // Style
+  // Gaussian blur, measured in layer units like in the SVG export (scales with the layer and zoom)
+  const blur = Math.max(0, Number(p.blur) || 0);
+  if (blur > 0) {
+    const m = ctx.getTransform();
+    const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+    ctx.filter = `blur(${(blur * scale).toFixed(2)}px)`;
+  }
+
+  // Style ('transparent' means no fill / no stroke)
+  const hasFill = !!p.fill && p.fill !== 'transparent';
+  const hasStroke = !!p.stroke && p.stroke !== 'transparent' && p.strokeWidth > 0;
   ctx.fillStyle = p.fill || '#000000';
   ctx.strokeStyle = p.stroke || 'transparent';
   ctx.lineWidth = p.strokeWidth || 1;
+  // Basic shapes keep sharp corners; imported paths and text use round joins (as in the SVG export)
+  const roundJoins = layer.type === 'path' || layer.type === 'text';
+  ctx.lineJoin = roundJoins ? 'round' : 'miter';
+  ctx.lineCap = roundJoins ? 'round' : 'butt';
+
+  const paint = (path?: Path2D, fillRule: CanvasFillRule = 'nonzero') => {
+    if (path) {
+      if (hasFill) ctx.fill(path, fillRule);
+      if (hasStroke) ctx.stroke(path);
+    } else {
+      if (hasFill) ctx.fill(fillRule);
+      if (hasStroke) ctx.stroke();
+    }
+  };
 
   const w = p.width;
   const h = p.height;
@@ -99,61 +132,30 @@ export function renderLayer(
   const halfH = h / 2;
 
   switch (layer.type) {
-    case 'rect': {
+    case 'rect':
+    case 'capsule': {
       ctx.beginPath();
-      const r = Math.min(p.radius || 0, halfW, halfH);
+      const r = layer.type === 'capsule' ? Math.min(halfW, halfH) : Math.max(0, Math.min(p.radius || 0, halfW, halfH));
       if (r > 0) {
         ctx.roundRect(-halfW, -halfH, w, h, r);
       } else {
         ctx.rect(-halfW, -halfH, w, h);
       }
-      ctx.fill();
-      if (p.stroke && p.stroke !== 'transparent' && p.strokeWidth > 0) {
-        ctx.stroke();
-      }
-      break;
-    }
-
-    case 'capsule': {
-      // Rounded pill / capsule (like the petals in the asterisco logo)
-      ctx.beginPath();
-      const r = Math.min(halfW, halfH);
-      ctx.roundRect(-halfW, -halfH, w, h, r);
-      ctx.fill();
-      if (p.stroke && p.stroke !== 'transparent' && p.strokeWidth > 0) {
-        ctx.stroke();
-      }
+      paint();
       break;
     }
 
     case 'ellipse': {
       ctx.beginPath();
-      ctx.ellipse(0, 0, halfW, halfH, 0, 0, Math.PI * 2);
-      ctx.fill();
-      if (p.stroke && p.stroke !== 'transparent' && p.strokeWidth > 0) {
-        ctx.stroke();
-      }
+      ctx.ellipse(0, 0, Math.abs(halfW), Math.abs(halfH), 0, 0, Math.PI * 2);
+      paint();
       break;
     }
 
+    case 'polygon':
     case 'star': {
-      ctx.beginPath();
-      const points = 5;
-      const outerR = halfW;
-      const innerR = halfW * 0.45;
-      for (let i = 0; i < points * 2; i++) {
-        const radius = i % 2 === 0 ? outerR : innerR;
-        const angle = (i * Math.PI) / points - Math.PI / 2;
-        const px = Math.cos(angle) * radius;
-        const py = Math.sin(angle) * radius;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      ctx.fill();
-      if (p.stroke && p.stroke !== 'transparent' && p.strokeWidth > 0) {
-        ctx.stroke();
-      }
+      const d = getShapePathData(layer.type, p);
+      if (d) paint(getCachedPath2D(d));
       break;
     }
 
@@ -164,21 +166,13 @@ export function renderLayer(
       ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(p.text || '', 0, 0);
-      if (p.stroke && p.stroke !== 'transparent' && p.strokeWidth > 0) {
-        ctx.strokeText(p.text || '', 0, 0);
-      }
+      if (hasFill) ctx.fillText(p.text || '', 0, 0);
+      if (hasStroke) ctx.strokeText(p.text || '', 0, 0);
       break;
     }
 
     case 'path': {
-      if (p.pathData) {
-        const path2d = getCachedPath2D(p.pathData);
-        ctx.fill(path2d, 'evenodd');
-        if (p.stroke && p.stroke !== 'transparent' && p.strokeWidth > 0) {
-          ctx.stroke(path2d);
-        }
-      }
+      if (p.pathData) paint(getCachedPath2D(p.pathData), 'evenodd');
       break;
     }
   }
@@ -223,7 +217,12 @@ export function renderProjectFrame(
   const multi = (options.selectedLayerIds ?? [])
     .map((id) => project.layers.find((l) => l.id === id))
     .filter((l): l is Layer => !!l && isShown(l));
-  if (multi.length > 1) {
+  const vertexLayer = options.vertexEditLayerId
+    ? project.layers.find((l) => l.id === options.vertexEditLayerId)
+    : undefined;
+  if (vertexLayer && isShown(vertexLayer)) {
+    drawVertexEditor(ctx, vertexLayer, currentTime, options.zoom || 1, options.selectedVertices ?? [], options.hoverVertex ?? null);
+  } else if (multi.length > 1) {
     drawGroupSelection(ctx, multi, currentTime, options.zoom || 1);
   } else if (options.selectedLayerId) {
     const selectedLayer = project.layers.find((l) => l.id === options.selectedLayerId);
@@ -408,6 +407,7 @@ export function getPathBounds(pathData: string): BoundingBox {
         height: Math.max(1, maxY - minY),
       };
 
+  if (pathBoundsCache.size > 500) pathBoundsCache.clear();
   pathBoundsCache.set(pathData, result);
   return result;
 }
@@ -548,5 +548,55 @@ function drawSelectionBounds(
   ctx.fillStyle = '#0084ff';
   ctx.fill();
 
+  ctx.restore();
+}
+
+/**
+ * Vertex editing: thin outline of the path plus a square on every vertex
+ */
+function drawVertexEditor(
+  ctx: CanvasRenderingContext2D,
+  layer: Layer,
+  currentTime: number,
+  zoom: number,
+  selectedVertices: number[],
+  hoverVertex: number | null
+) {
+  const p = getLayerPropertiesAtTime(layer, currentTime);
+  if (!p.pathData) return;
+  const invZoom = 1 / Math.max(0.001, zoom);
+  const segments = parsePath(p.pathData);
+  // A vertex shared by the start and the end of a closed subpath counts as one
+  const linked = (list: number[]) =>
+    new Set(list.filter((i) => segments[i] && segments[i].cmd !== 'Z').flatMap((i) => getLinkedSegments(segments, i)));
+  const selected = linked(selectedVertices);
+  const hovered = linked(hoverVertex !== null ? [hoverVertex] : []);
+
+  ctx.save();
+  // Outline in layer space, with a constant on-screen width
+  ctx.save();
+  const det = (t: DOMMatrix) => Math.sqrt(Math.abs(t.a * t.d - t.b * t.c)) || 1;
+  const worldScale = det(ctx.getTransform());
+  const ax = p.anchorX || 0;
+  const ay = p.anchorY || 0;
+  ctx.translate(p.x + ax, p.y + ay);
+  ctx.rotate(((p.rotation || 0) * Math.PI) / 180);
+  ctx.scale(p.scaleX ?? 1, p.scaleY ?? 1);
+  ctx.translate(-ax, -ay);
+  const layerScale = det(ctx.getTransform()) / worldScale;
+  ctx.strokeStyle = '#0084ff';
+  ctx.lineWidth = (1.5 * invZoom) / layerScale;
+  ctx.stroke(getCachedPath2D(p.pathData));
+  ctx.restore();
+
+  ctx.lineWidth = 1.5 * invZoom;
+  ctx.strokeStyle = '#0084ff';
+  for (const v of getPathVertices(segments)) {
+    const w = layerLocalToWorld(p, v.x, v.y);
+    const half = (hovered.has(v.segment) ? 4.5 : 3.5) * invZoom;
+    ctx.fillStyle = selected.has(v.segment) ? '#0084ff' : '#ffffff';
+    ctx.fillRect(w.x - half, w.y - half, half * 2, half * 2);
+    ctx.strokeRect(w.x - half, w.y - half, half * 2, half * 2);
+  }
   ctx.restore();
 }

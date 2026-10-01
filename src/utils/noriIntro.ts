@@ -21,7 +21,7 @@ const INK = '#1A1D23';
 // ── Easing curves ──────────────────────────────────────────────────────────
 
 const spring = (stiffness: number, damping: number): EasingConfig => ({
-  type: 'spring',
+  type: 'custom-spring',
   bezier: { x1: 0.25, y1: 1, x2: 0.5, y2: 1 },
   spring: { stiffness, damping, mass: 1 },
 });

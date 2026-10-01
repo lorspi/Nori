@@ -1,4 +1,17 @@
-export type EasingType = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'bezier' | 'spring' | 'bounce';
+// Built-in curves keep their own fixed parameters ('spring' reads `spring` for older projects).
+// The custom types ("Personalizada") hold the parameters edited by the user; 'bezier' is
+// the custom cubic Bézier (name kept so projects and Lottie imports stay compatible).
+export type EasingPresetType =
+  | 'linear'
+  | 'ease-in'
+  | 'ease-out'
+  | 'ease-in-out'
+  | 'back-in'
+  | 'back-out'
+  | 'bounce'
+  | 'spring';
+
+export type EasingType = EasingPresetType | 'bezier' | 'custom-spring' | 'custom-bounce';
 
 export interface CubicBezierConfig {
   x1: number;
@@ -13,10 +26,16 @@ export interface SpringConfig {
   mass: number;      // e.g. 1
 }
 
+export interface BounceConfig {
+  bounces: number;     // number of bounces after the first impact (1–8)
+  restitution: number; // height kept on each bounce, 0..1 (0.5 = classic ease-out bounce)
+}
+
 export interface EasingConfig {
   type: EasingType;
   bezier: CubicBezierConfig;
   spring: SpringConfig;
+  bounce?: BounceConfig; // only stored by 'custom-bounce'
 }
 
 export type AnimatableProperty =
@@ -33,7 +52,9 @@ export type AnimatableProperty =
   | 'strokeWidth'
   | 'radius'
   | 'width'
-  | 'height';
+  | 'height'
+  | 'blur'
+  | 'pathData';
 
 export interface Keyframe {
   id: string;
@@ -49,7 +70,8 @@ export interface PropertyTrack {
   keyframes: Keyframe[];
 }
 
-export type LayerType = 'rect' | 'ellipse' | 'capsule' | 'text' | 'star' | 'path' | 'group';
+// 'capsule' and 'text' can no longer be added, but older projects and SVG imports still use them
+export type LayerType = 'rect' | 'ellipse' | 'polygon' | 'star' | 'path' | 'capsule' | 'text' | 'group';
 
 export interface LayerProperties {
   x: number;
@@ -62,10 +84,14 @@ export interface LayerProperties {
   scaleY: number;
   rotation: number; // degrees
   opacity: number;  // 0 to 1
-  fill: string;
-  stroke: string;
+  fill: string;   // 'transparent' = no fill
+  stroke: string; // 'transparent' = no stroke
   strokeWidth: number;
-  radius: number;
+  radius: number; // corner radius (rect, polygon, star)
+  sides?: number;       // polygon
+  points?: number;      // star
+  innerRadius?: number; // star: inner / outer radius (0..1)
+  blur?: number;        // gaussian blur in px
   text?: string;
   fontSize?: number;
   fontWeight?: string;

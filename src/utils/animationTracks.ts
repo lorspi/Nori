@@ -13,9 +13,11 @@ export const PROPERTY_META: Record<AnimatableProperty, { label: string; unit: st
   fill: { label: 'Relleno', unit: '' },
   stroke: { label: 'Trazo', unit: '' },
   strokeWidth: { label: 'Grosor de trazo', unit: 'px' },
-  radius: { label: 'Radio', unit: 'px' },
+  radius: { label: 'Radio de esquinas', unit: 'px' },
   width: { label: 'Ancho', unit: 'px' },
   height: { label: 'Alto', unit: 'px' },
+  blur: { label: 'Desenfoque', unit: 'px' },
+  pathData: { label: 'Forma (vértices)', unit: '' },
 };
 
 export const ANIMATABLE_PROPERTIES = Object.keys(PROPERTY_META) as AnimatableProperty[];
@@ -24,7 +26,7 @@ export const isAnimatableProperty = (prop: string): prop is AnimatableProperty =
   prop in PROPERTY_META;
 
 export const createDefaultEasing = (): EasingConfig => ({
-  type: 'spring',
+  type: 'linear',
   bezier: { x1: 0.25, y1: 1, x2: 0.5, y2: 1 },
   spring: { stiffness: 270.18, damping: 13.2, mass: 1 },
 });
@@ -86,6 +88,8 @@ const PROPERTY_SIBLINGS: Partial<Record<AnimatableProperty, AnimatableProperty>>
   anchorY: 'anchorX',
   scaleX: 'scaleY',
   scaleY: 'scaleX',
+  stroke: 'strokeWidth',
+  strokeWidth: 'stroke',
 };
 
 export const getSiblingProperty = (prop: string): AnimatableProperty | undefined =>

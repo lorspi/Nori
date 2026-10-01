@@ -58,7 +58,7 @@ export const UI_NOTIFICATION_PROJECT: Project = {
               time: 0.2,
               value: 0.6,
               easing: {
-                type: 'spring',
+                type: 'custom-spring',
                 bezier: { x1: 0.2, y1: 1, x2: 0.4, y2: 1 },
                 spring: { stiffness: 300, damping: 15, mass: 1 },
               },
@@ -68,7 +68,7 @@ export const UI_NOTIFICATION_PROJECT: Project = {
               time: 0.85,
               value: 1,
               easing: {
-                type: 'spring',
+                type: 'custom-spring',
                 bezier: { x1: 0.2, y1: 1, x2: 0.4, y2: 1 },
                 spring: { stiffness: 300, damping: 15, mass: 1 },
               },

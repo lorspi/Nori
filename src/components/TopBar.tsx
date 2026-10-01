@@ -2,10 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Cursor as MousePointer,
   Hand,
-  TextT as Type,
   Square,
   Circle,
   Star,
+  Triangle,
+  Hexagon,
   Download,
   FolderOpen,
   FileSvg,
@@ -13,7 +14,6 @@ import {
   FloppyDisk as Save,
   FilePlus,
   CaretDown as ChevronDown,
-  Check,
   Checkerboard as Grid,
   ArrowUUpLeft as Undo2,
   ArrowUUpRight as Redo2,
@@ -22,9 +22,22 @@ import {
 import { Project } from '../types/animation';
 import { ToastType } from '../lib/ui';
 import ThemeToggle from './ThemeToggle';
+import { Dropdown } from './Dropdown';
 import { isLottieJson, convertLottieToProject } from '../utils/lottieImporter';
 
-export type ToolMode = 'select' | 'hand' | 'text' | 'rect' | 'capsule' | 'ellipse' | 'star';
+const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2, 4.38];
+
+export type ToolMode = 'select' | 'hand';
+
+export type ShapeType = 'rect' | 'ellipse' | 'triangle' | 'polygon' | 'star';
+
+const SHAPE_MENU: { type: ShapeType; label: string; Icon: React.ElementType }[] = [
+  { type: 'rect', label: 'Rectángulo', Icon: Square },
+  { type: 'ellipse', label: 'Elipse', Icon: Circle },
+  { type: 'triangle', label: 'Triángulo', Icon: Triangle },
+  { type: 'polygon', label: 'Polígono', Icon: Hexagon },
+  { type: 'star', label: 'Estrella', Icon: Star },
+];
 
 interface TopBarProps {
   project: Project;
@@ -45,7 +58,7 @@ interface TopBarProps {
   onImportSvg: (svgText: string, fileName: string) => void;
   onOpenPasteSvg: () => void;
   onRenameProject: (title: string) => void;
-  onAddLayer: (type: 'rect' | 'capsule' | 'ellipse' | 'star' | 'text') => void;
+  onAddLayer: (type: ShapeType) => void;
   onShowToast?: (message: string, type?: ToastType) => void;
   onOpenAbout: () => void;
 }
@@ -101,7 +114,6 @@ export const TopBar: React.FC<TopBarProps> = ({
     }
   };
   const [showShapesDropdown, setShowShapesDropdown] = React.useState(false);
-  const [showZoomDropdown, setShowZoomDropdown] = React.useState(false);
 
   const notify = (msg: string, type: ToastType = 'error') => {
     if (onShowToast) onShowToast(msg, type);
@@ -229,28 +241,13 @@ export const TopBar: React.FC<TopBarProps> = ({
           >
             <Hand className="w-3.5 h-3.5" />
           </button>
-          <button
-            onClick={() => {
-              setActiveTool('text');
-              onAddLayer('text');
-            }}
-            title="Añadir Texto (T)"
-            className={`p-1.5 rounded-md transition-colors ${
-              activeTool === 'text'
-                ? 'bg-bento-blue text-white'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-            }`}
-          >
-            <Type className="w-3.5 h-3.5" />
-          </button>
-
           {/* Shape tools dropdown */}
           <div className="relative">
             <button
               onClick={() => setShowShapesDropdown(!showShapesDropdown)}
               title="Añadir Formas / Vectores"
               className={`p-1.5 rounded-md transition-colors flex items-center gap-0.5 ${
-                ['rect', 'capsule', 'ellipse', 'star'].includes(activeTool)
+                showShapesDropdown
                   ? 'bg-bento-blue text-white'
                   : 'text-muted-foreground hover:text-foreground hover:bg-accent'
               }`}
@@ -261,37 +258,19 @@ export const TopBar: React.FC<TopBarProps> = ({
 
             {showShapesDropdown && (
               <div
-                className="absolute left-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 w-44 z-50 text-foreground"
+                className="absolute left-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 w-40 z-50 text-foreground"
                 onClick={() => setShowShapesDropdown(false)}
               >
-                <button
-                  onClick={() => onAddLayer('rect')}
-                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
-                >
-                  <Square className="w-3.5 h-3.5 text-bento-blue" />
-                  <span>Rectángulo</span>
-                </button>
-                <button
-                  onClick={() => onAddLayer('capsule')}
-                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
-                >
-                  <div className="w-3.5 h-2 rounded-full border border-bento-blue bg-bento-blue/30" />
-                  <span>Cápsula / Pétalo</span>
-                </button>
-                <button
-                  onClick={() => onAddLayer('ellipse')}
-                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
-                >
-                  <Circle className="w-3.5 h-3.5 text-bento-blue" />
-                  <span>Círculo / Elipse</span>
-                </button>
-                <button
-                  onClick={() => onAddLayer('star')}
-                  className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
-                >
-                  <Star className="w-3.5 h-3.5 text-bento-blue" />
-                  <span>Estrella Vectorial</span>
-                </button>
+                {SHAPE_MENU.map(({ type, label, Icon }) => (
+                  <button
+                    key={type}
+                    onClick={() => onAddLayer(type)}
+                    className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
+                  >
+                    <Icon className="w-3.5 h-3.5 text-bento-blue" />
+                    <span>{label}</span>
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -430,33 +409,15 @@ export const TopBar: React.FC<TopBarProps> = ({
         </button>
 
         {/* Zoom selector */}
-        <div className="relative">
-          <button
-            onClick={() => setShowZoomDropdown(!showZoomDropdown)}
-            className="flex items-center gap-1 px-2 h-8 bg-secondary border border-border rounded-lg text-foreground font-mono text-[11px] cursor-pointer"
-          >
-            <span>{Math.round(zoom * 100)}%</span>
-            <ChevronDown className="w-2.5 h-2.5 text-muted-foreground" />
-          </button>
-
-          {showZoomDropdown && (
-            <div
-              className="absolute right-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 w-28 z-50 text-foreground"
-              onClick={() => setShowZoomDropdown(false)}
-            >
-              {[0.5, 0.75, 1, 1.5, 2, 4.38].map((z) => (
-                <button
-                  key={z}
-                  onClick={() => setZoom(z)}
-                  className="w-full px-3 py-1 flex items-center justify-between hover:bg-accent text-left font-mono text-xs"
-                >
-                  <span>{Math.round(z * 100)}%</span>
-                  {Math.abs(zoom - z) < 0.05 && <Check className="w-3 h-3 text-bento-blue" />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <Dropdown
+          value={zoom}
+          options={ZOOM_LEVELS.map((z) => ({ value: z, label: `${Math.round(z * 100)}%` }))}
+          onChange={setZoom}
+          isSelected={(z, current) => Math.abs(current - z) < 0.05}
+          triggerLabel={<span>{Math.round(zoom * 100)}%</span>}
+          className="font-mono"
+          title="Zoom"
+        />
 
         {/* About Nori */}
         <button

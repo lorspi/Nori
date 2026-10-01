@@ -22,8 +22,17 @@ import {
   getWorldBox,
   hitTestHandle,
   hitTestRotation,
+  layerLocalToWorld,
   worldToLayerLocal,
 } from '../utils/transformHandles';
+import {
+  PathSegment,
+  getLinkedSegments,
+  getPathVertices,
+  moveVertices,
+  parsePath,
+  serializePath,
+} from '../utils/pathGeometry';
 import { ToolMode } from './TopBar';
 
 interface CanvasViewProps {
@@ -39,6 +48,10 @@ interface CanvasViewProps {
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   showCheckerboard: boolean;
+  // Vertex editing of a path layer
+  vertexEditLayerId: string | null;
+  onToggleVertexEdit: (layerId: string) => void;
+  onExitVertexEdit: () => void;
 }
 
 type Point = { x: number; y: number };
@@ -52,7 +65,10 @@ type Drag =
   | { kind: 'rotate'; layerId: string; start: LayerProperties; startMouse: Point }
   | { kind: 'groupScale'; members: GroupMember[]; box: Box; handle: SelectionHandle }
   | { kind: 'groupRotate'; members: GroupMember[]; box: Box; startMouse: Point }
-  | { kind: 'marquee'; start: Point; current: Point; base: string[] };
+  | { kind: 'marquee'; start: Point; current: Point; base: string[] }
+  | { kind: 'vertex'; layerId: string; segments: PathSegment[]; indices: number[]; start: LayerProperties; startLocal: Point }
+  // Box selection of vertices; onLayer = it started over the edited shape
+  | { kind: 'vertexMarquee'; start: Point; current: Point; base: number[]; onLayer: boolean };
 
 export const CanvasView: React.FC<CanvasViewProps> = ({
   project,
@@ -66,6 +82,9 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
   zoom,
   setZoom,
   showCheckerboard,
+  vertexEditLayerId,
+  onToggleVertexEdit,
+  onExitVertexEdit,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -84,6 +103,15 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
   const hasRecordedDragRef = useRef(false);
   const lastMarqueeRef = useRef('');
   const [hoverCursor, setHoverCursor] = useState<string | null>(null);
+  // Vertex under the cursor and selected vertices (segment indices) while editing vertices
+  const [hoverVertex, setHoverVertex] = useState<number | null>(null);
+  const [selectedVertices, setSelectedVertices] = useState<number[]>([]);
+
+  // A new vertex editing session starts with nothing selected
+  useEffect(() => {
+    setSelectedVertices([]);
+    setHoverVertex(null);
+  }, [vertexEditLayerId]);
 
   // Render canvas whenever inputs change with full device pixel ratio
   const render = useCallback(() => {
@@ -115,10 +143,13 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       selectedLayerId,
       selectedLayerIds,
       zoom,
+      vertexEditLayerId,
+      selectedVertices,
+      hoverVertex,
     });
 
     ctx.restore();
-  }, [project, currentTime, showCheckerboard, selectedLayerId, selectedLayerIds, zoom]);
+  }, [project, currentTime, showCheckerboard, selectedLayerId, selectedLayerIds, zoom, vertexEditLayerId, hoverVertex, selectedVertices]);
 
   useEffect(() => {
     render();
@@ -285,6 +316,91 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     return null;
   };
 
+  // Layer being vertex-edited, if it can be edited right now
+  const getVertexLayer = () => {
+    const layer = vertexEditLayerId ? project.layers.find((l) => l.id === vertexEditLayerId) : undefined;
+    return layer && layer.type === 'path' && isEditable(layer) ? layer : null;
+  };
+
+  // Vertex of the edited path under the point (segment index)
+  const hitTestVertex = (pt: Point): { layer: Layer; props: LayerProperties; segment: number } | null => {
+    const layer = getVertexLayer();
+    if (!layer) return null;
+    const props = getLayerPropertiesAtTime(layer, currentTime);
+    if (!props.pathData) return null;
+    const radius = 7 / zoom;
+    let best: number | null = null;
+    let bestDist = Infinity;
+    for (const v of getPathVertices(parsePath(props.pathData))) {
+      const w = layerLocalToWorld(props, v.x, v.y);
+      const d = Math.hypot(pt.x - w.x, pt.y - w.y);
+      if (d <= radius && d < bestDist) {
+        best = v.segment;
+        bestDist = d;
+      }
+    }
+    return best === null ? null : { layer, props, segment: best };
+  };
+
+  // Vertices of the edited path inside a canvas rectangle
+  const getVerticesInBox = (box: Box): number[] => {
+    const layer = getVertexLayer();
+    if (!layer) return [];
+    const props = getLayerPropertiesAtTime(layer, currentTime);
+    if (!props.pathData) return [];
+    return getPathVertices(parsePath(props.pathData))
+      .filter((v) => {
+        const w = layerLocalToWorld(props, v.x, v.y);
+        return w.x >= box.minX && w.x <= box.maxX && w.y >= box.minY && w.y <= box.maxY;
+      })
+      .map((v) => v.segment);
+  };
+
+  // Segments moved together with the selected vertices (closing points included)
+  const getMovedSegments = (segments: PathSegment[], vertices: number[]) => [
+    ...new Set(vertices.filter((i) => segments[i]).flatMap((i) => getLinkedSegments(segments, i))),
+  ];
+
+  // Arrow keys nudge the selected vertices 1 px (Shift: 10 px) on the canvas
+  useEffect(() => {
+    if (!vertexEditLayerId || selectedVertices.length === 0) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const dir: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const d = dir[e.code];
+      if (!d) return;
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+      const layer = getVertexLayer();
+      if (!layer) return;
+      const props = getLayerPropertiesAtTime(layer, currentTime);
+      if (!props.pathData) return;
+      // Keep the timeline from stepping frames with the same keys
+      e.preventDefault();
+      e.stopPropagation();
+
+      const step = e.shiftKey ? 10 : 1;
+      // Canvas offset expressed in the layer's own (rotated / scaled) coordinates
+      const origin = worldToLayerLocal(props, 0, 0);
+      const target = worldToLayerLocal(props, d[0] * step, d[1] * step);
+      const segments = parsePath(props.pathData);
+      const moved = moveVertices(
+        segments,
+        getMovedSegments(segments, selectedVertices),
+        target.x - origin.x,
+        target.y - origin.y
+      );
+      onStartDragLayer?.(); // one undo step per key press
+      onUpdateLayerProperties(layer.id, { pathData: serializePath(moved) }, false);
+    };
+    // Capture phase: runs before the app's global shortcuts
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  });
+
   // ── Mouse down: decide which drag starts ────────────────────────────────
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -298,6 +414,41 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     const pt = clientToCanvas(e.clientX, e.clientY);
     const additive = e.shiftKey || e.ctrlKey || e.metaKey;
     hasRecordedDragRef.current = false;
+
+    // 0. Vertex editing: click a vertex to select it (Shift / Ctrl adds or removes it) and drag
+    // to move every selected vertex; drag elsewhere to box-select. A click outside the shape
+    // leaves the mode.
+    if (vertexEditLayerId && getVertexLayer()) {
+      const vertexHit = hitTestVertex(pt);
+      if (vertexHit) {
+        const isSelected = selectedVertices.includes(vertexHit.segment);
+        if (additive && isSelected) {
+          setSelectedVertices(selectedVertices.filter((i) => i !== vertexHit.segment));
+          return;
+        }
+        const selection = additive
+          ? [...selectedVertices, vertexHit.segment]
+          : isSelected
+            ? selectedVertices
+            : [vertexHit.segment];
+        setSelectedVertices(selection);
+        const segments = parsePath(vertexHit.props.pathData!);
+        setDrag({
+          kind: 'vertex',
+          layerId: vertexHit.layer.id,
+          segments,
+          indices: getMovedSegments(segments, selection),
+          start: vertexHit.props,
+          startLocal: worldToLayerLocal(vertexHit.props, pt.x, pt.y),
+        });
+        return;
+      }
+      const base = additive ? selectedVertices : [];
+      if (!additive) setSelectedVertices([]);
+      setDrag({ kind: 'vertexMarquee', start: pt, current: pt, base, onLayer: hitTestLayer(pt)?.id === vertexEditLayerId });
+      return;
+    }
+    if (vertexEditLayerId) onExitVertexEdit();
 
     // 1. Handles, rotation zone or anchor of the current selection
     const members = getSelectionMembers();
@@ -377,6 +528,24 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       const pt = clientToCanvas(e.clientX, e.clientY);
 
       switch (d.kind) {
+        case 'vertex': {
+          const local = worldToLayerLocal(d.start, pt.x, pt.y);
+          const moved = moveVertices(d.segments, d.indices, local.x - d.startLocal.x, local.y - d.startLocal.y);
+          recordOnce();
+          onUpdateLayerProperties(d.layerId, { pathData: serializePath(moved) }, false);
+          break;
+        }
+        case 'vertexMarquee': {
+          const hits = getVerticesInBox({
+            minX: Math.min(d.start.x, pt.x),
+            minY: Math.min(d.start.y, pt.y),
+            maxX: Math.max(d.start.x, pt.x),
+            maxY: Math.max(d.start.y, pt.y),
+          });
+          setSelectedVertices([...d.base, ...hits.filter((i) => !d.base.includes(i))]);
+          setDrag({ ...d, current: pt });
+          break;
+        }
         case 'move': {
           const dx = pt.x - d.startMouse.x;
           const dy = pt.y - d.startMouse.y;
@@ -449,6 +618,16 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     };
 
     const handleWindowMouseUp = () => {
+      const d = dragRef.current;
+      // A plain click (no box) outside the edited shape leaves vertex editing
+      if (
+        d?.kind === 'vertexMarquee' &&
+        !d.onLayer &&
+        d.base.length === 0 &&
+        Math.hypot(d.current.x - d.start.x, d.current.y - d.start.y) * zoom < 3
+      ) {
+        onExitVertexEdit();
+      }
       setDrag(null);
       hasRecordedDragRef.current = false;
     };
@@ -459,7 +638,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
     };
-  }, [drag?.kind, project, currentTime, zoom, onStartDragLayer, onUpdateLayerProperties, onSelectLayers]);
+  }, [drag?.kind, project, currentTime, zoom, onStartDragLayer, onUpdateLayerProperties, onSelectLayers, onExitVertexEdit]);
 
   // Hover feedback: resize / rotate / anchor cursors over the selection
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -467,6 +646,14 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       if (hoverCursor && !drag) setHoverCursor(null);
       return;
     }
+    if (vertexEditLayerId) {
+      const segment = hitTestVertex(clientToCanvas(e.clientX, e.clientY))?.segment ?? null;
+      if (segment !== hoverVertex) setHoverVertex(segment);
+      const next = segment !== null ? 'move' : null;
+      if (next !== hoverCursor) setHoverCursor(next);
+      return;
+    }
+    if (hoverVertex !== null) setHoverVertex(null);
     const hit = hitTestSelection(getSelectionMembers(), clientToCanvas(e.clientX, e.clientY));
     const next = hit?.cursor ?? null;
     if (next !== hoverCursor) setHoverCursor(next);
@@ -485,6 +672,8 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
         return ROTATE_CURSOR;
       case 'anchor':
         return 'crosshair';
+      case 'vertex':
+        return 'move';
       case 'move':
         return 'default';
     }
@@ -493,7 +682,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
 
   // Box selection rectangle in container (screen) coordinates
   const marquee =
-    drag?.kind === 'marquee'
+    drag?.kind === 'marquee' || drag?.kind === 'vertexMarquee'
       ? {
           left: pan.x + Math.min(drag.start.x, drag.current.x) * zoom,
           top: pan.y + Math.min(drag.start.y, drag.current.y) * zoom,
@@ -507,6 +696,14 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       ref={containerRef}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
+      onDoubleClick={(e) => {
+        // Double click on a path (or the edited one) toggles vertex editing
+        if (activeTool !== 'select' || e.button !== 0) return;
+        const pt = clientToCanvas(e.clientX, e.clientY);
+        if (hitTestVertex(pt)) return;
+        const hit = hitTestLayer(pt);
+        if (hit?.type === 'path') onToggleVertexEdit(hit.id);
+      }}
       style={{ cursor }}
       className="relative flex-1 h-full overflow-hidden bg-background select-none"
     >
@@ -528,6 +725,12 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           <span>{project.width} × {project.height} px</span>
           <span>·</span>
           <span>{project.title}</span>
+          {vertexEditLayerId && (
+            <>
+              <span>·</span>
+              <span className="text-bento-blue">Editando vértices (Esc o Enter para salir)</span>
+            </>
+          )}
           {selectedLayerIds.length > 1 && (
             <>
               <span>·</span>
