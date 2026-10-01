@@ -349,6 +349,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
         options={menuOptions}
         onChange={handleMenuChange}
         align="left"
+        size="sm"
         className="w-full font-medium"
         menuClassName="w-full"
         optionClassName=""

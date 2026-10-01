@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.0.1] — 2026-10-01
+
+### Changed
+
+- **Navegar por fotogramas clave de la selección**
+  "Ir al fotograma clave anterior" e "Ir al fotograma clave siguiente" (y Ctrl + F / Ctrl + G) saltan solo entre los fotogramas clave de las capas seleccionadas. Si no hay ninguna capa seleccionada, siguen saltando entre los de todas las capas.
+
+- **Espacio: tocar para reproducir, mantener para desplazar**
+  Un toque corto de Espacio reproduce o pausa la animación. Mantener Espacio pulsado (para arrastrar el lienzo) ya no inicia ni detiene la reproducción. El toque se reconoce aunque la reproducción esté en marcha y también justo después de editar un campo numérico del Inspector, que conserva el foco.
+
+- **Mover el cursor de tiempo detiene la reproducción**
+  Al hacer clic o arrastrar en la regla de la línea del tiempo, usar los botones de ir al inicio, al final o a un fotograma clave, o los atajos F y G, la reproducción se pausa.
+
+### Fixed
+
+- **Altura de los campos**
+  Los campos de cada panel tienen la misma altura: en el Inspector, los campos de texto, los números, los desplegables (FPS, Grosor y la curva de suavizado), las muestras de color y los botones junto a ellos miden lo mismo; en la ventana de exportar, el campo y la muestra del color de fondo tienen la altura de los desplegables.
+
+- **Espaciado de Rotación, Opacidad y Escala**
+  La separación entre las etiquetas Rotación, Opacidad y Escala y sus campos es la misma que en Posición y Punto de Anclaje.
+
 ## [1.0.0] — 2026-10-01
 
 ### Added

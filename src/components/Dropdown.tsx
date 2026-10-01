@@ -20,6 +20,8 @@ interface DropdownProps<T> {
   // Decides which option shows the check mark (defaults to strict equality)
   isSelected?: (option: T, value: T) => boolean;
   align?: 'left' | 'right';
+  // md (32 px) matches the top bar and dialogs; sm (28 px) matches the Inspector fields
+  size?: 'sm' | 'md';
   className?: string;
   menuClassName?: string;
   optionClassName?: string;
@@ -37,6 +39,7 @@ export function Dropdown<T>({
   triggerLabel,
   isSelected = (option, current) => option === current,
   align = 'right',
+  size = 'md',
   className = '',
   menuClassName = 'w-28',
   optionClassName = 'font-mono',
@@ -64,6 +67,7 @@ export function Dropdown<T>({
   }, [open]);
 
   const selected = options.find((o) => isSelected(o.value, value));
+  const sizeClass = size === 'sm' ? 'h-7 rounded-md' : 'h-8 rounded-lg';
 
   return (
     <div className="relative" ref={rootRef}>
@@ -71,7 +75,7 @@ export function Dropdown<T>({
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         disabled={disabled}
-        className={`flex items-center gap-1 px-2 h-8 bg-secondary border border-border rounded-lg text-foreground text-[11px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+        className={`flex items-center gap-1 px-2 ${sizeClass} bg-secondary border border-border text-foreground text-[11px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
         data-tooltip={title}
         aria-label={ariaLabel}
         aria-haspopup="listbox"

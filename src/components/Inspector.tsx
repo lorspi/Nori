@@ -154,7 +154,7 @@ export const Inspector: React.FC<InspectorProps> = ({
               type="text"
               value={project.title}
               onChange={(e) => onUpdateProjectSettings({ title: e.target.value })}
-              className="w-full bg-secondary border border-border rounded-md px-2.5 py-1.5 text-foreground focus:outline-none focus:border-bento-blue"
+              className="w-full bg-secondary border border-border rounded-md px-2 h-7 text-foreground focus:outline-none focus:border-bento-blue"
             />
           </div>
 
@@ -173,7 +173,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 type="number"
                 value={project.width}
                 onChange={(e) => onUpdateProjectSettings({ width: Number(e.target.value) })}
-                className="w-full bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
+                className="w-full bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
               />
             </div>
             <div>
@@ -190,7 +190,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 type="number"
                 value={project.height}
                 onChange={(e) => onUpdateProjectSettings({ height: Number(e.target.value) })}
-                className="w-full bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
+                className="w-full bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
               />
             </div>
           </div>
@@ -215,7 +215,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 max="60"
                 value={project.duration}
                 onChange={(e) => onUpdateProjectSettings({ duration: Number(e.target.value) })}
-                className="w-full bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
+                className="w-full bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
               />
             </div>
             <div>
@@ -225,6 +225,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 options={[24, 30, 60].map((fps) => ({ value: fps, label: `${fps} fps` }))}
                 onChange={(fps) => onUpdateProjectSettings({ fps })}
                 align="left"
+                size="sm"
                 className="w-full font-mono"
                 menuClassName="w-full"
                 ariaLabel="FPS"
@@ -245,7 +246,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 value={project.backgroundColor}
                 onFocus={typingSession.begin}
                 onChange={(e) => onUpdateProjectSettings({ backgroundColor: e.target.value }, typingSession.take())}
-                className="flex-1 bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
+                className="flex-1 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
               />
             </div>
           </div>
@@ -316,7 +317,7 @@ export const Inspector: React.FC<InspectorProps> = ({
           placeholder={emptyLabel}
           onFocus={typingSession.begin}
           onChange={(e) => setColor(e.target.value.trim() || 'transparent', typingSession.take())}
-          className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground placeholder:text-muted-foreground"
+          className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground placeholder:text-muted-foreground"
         />
         <button
           type="button"
@@ -328,7 +329,7 @@ export const Inspector: React.FC<InspectorProps> = ({
               setColor('transparent');
             }
           }}
-          className="p-1.5 rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
+          className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
           data-tooltip={none ? (prop === 'fill' ? 'Añadir relleno' : 'Añadir trazo') : prop === 'fill' ? 'Quitar relleno' : 'Quitar trazo'}
         >
           {none ? <Plus className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
@@ -360,7 +361,7 @@ export const Inspector: React.FC<InspectorProps> = ({
       return toValue(next);
     };
     return (
-      <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1" data-tooltip={title}>
+      <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7" data-tooltip={title}>
         <ScrubLabel
           value={shown}
           step={step}
@@ -421,7 +422,7 @@ export const Inspector: React.FC<InspectorProps> = ({
             Animación
           </span>
           <div className="grid grid-cols-2 gap-2">
-            <div className="bg-secondary border border-border rounded-md p-1.5 flex items-center justify-between">
+            <div className="bg-secondary border border-border rounded-md px-1.5 h-7 flex items-center justify-between">
               <div className="flex items-center gap-1 text-muted-foreground">
                 <Clock className="w-3 h-3 text-bento-blue" />
                 <span>Start</span>
@@ -430,7 +431,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 {keyframeRange ? `${keyframeRange.start.toFixed(2)}s` : '—'}
               </span>
             </div>
-            <div className="bg-secondary border border-border rounded-md p-1.5 flex items-center justify-between">
+            <div className="bg-secondary border border-border rounded-md px-1.5 h-7 flex items-center justify-between">
               <div className="flex items-center gap-1 text-muted-foreground">
                 <Clock className="w-3 h-3 text-bento-blue" />
                 <span>Duration</span>
@@ -497,7 +498,7 @@ export const Inspector: React.FC<InspectorProps> = ({
               {renderAnimToggle(['x', 'y'], 'posición')}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
+              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
                 <ScrubLabel
                   value={Math.round(p.x)}
                   onScrubStart={onStartScrub}
@@ -514,7 +515,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   data-tooltip="Posición X"
                 />
               </div>
-              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
+              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
                 <ScrubLabel
                   value={Math.round(p.y)}
                   onScrubStart={onStartScrub}
@@ -554,7 +555,7 @@ export const Inspector: React.FC<InspectorProps> = ({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
+              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
                 <ScrubLabel
                   value={Math.round(p.anchorX || 0)}
                   onScrubStart={onStartScrub}
@@ -571,7 +572,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   data-tooltip="Punto de anclaje X (horizontal)"
                 />
               </div>
-              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
+              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
                 <ScrubLabel
                   value={Math.round(p.anchorY || 0)}
                   onScrubStart={onStartScrub}
@@ -592,109 +593,113 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
 
           {/* Scale X / Y & Link */}
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-muted-foreground font-medium">Escala</span>
-            {renderAnimToggle(['scaleX', 'scaleY'], 'escala')}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="flex-1 flex items-center gap-1 bg-secondary border border-border rounded-md px-2 py-1">
-              <ScrubLabel
-                value={Math.round((p.scaleX ?? 1) * 100)}
-                onScrubStart={onStartScrub}
-                onChange={(v) => setScale('scaleX', v, false)}
-                className="text-muted-foreground font-mono"
-              >
-                W
-              </ScrubLabel>
-              <input
-                type="number"
-                value={Math.round((p.scaleX ?? 1) * 100)}
-                onChange={(e) => setScale('scaleX', Number(e.target.value))}
-                className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-              />
-              <span className="text-muted-foreground font-mono text-[10px]">%</span>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-muted-foreground font-medium">Escala</span>
+              {renderAnimToggle(['scaleX', 'scaleY'], 'escala')}
             </div>
+            <div className="flex items-center gap-1.5">
+              <div className="flex-1 flex items-center gap-1 bg-secondary border border-border rounded-md px-2 h-7">
+                <ScrubLabel
+                  value={Math.round((p.scaleX ?? 1) * 100)}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => setScale('scaleX', v, false)}
+                  className="text-muted-foreground font-mono"
+                >
+                  W
+                </ScrubLabel>
+                <input
+                  type="number"
+                  value={Math.round((p.scaleX ?? 1) * 100)}
+                  onChange={(e) => setScale('scaleX', Number(e.target.value))}
+                  className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
+                />
+                <span className="text-muted-foreground font-mono text-[10px]">%</span>
+              </div>
 
-            <button
-              onClick={() => setAspectLocked(!aspectLocked)}
-              className={`p-1.5 rounded-md border ${
-                aspectLocked
-                  ? 'bg-bento-blue/10 border-bento-blue/40 text-bento-blue'
-                  : 'bg-secondary border-border text-muted-foreground'
-              }`}
-              data-tooltip="Vincular proporción"
-            >
-              {aspectLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
-            </button>
-
-            <div className="flex-1 flex items-center gap-1 bg-secondary border border-border rounded-md px-2 py-1">
-              <ScrubLabel
-                value={Math.round((p.scaleY ?? 1) * 100)}
-                onScrubStart={onStartScrub}
-                onChange={(v) => setScale('scaleY', v, false)}
-                className="text-muted-foreground font-mono"
+              <button
+                onClick={() => setAspectLocked(!aspectLocked)}
+                className={`w-7 h-7 shrink-0 flex items-center justify-center rounded-md border ${
+                  aspectLocked
+                    ? 'bg-bento-blue/10 border-bento-blue/40 text-bento-blue'
+                    : 'bg-secondary border-border text-muted-foreground'
+                }`}
+                data-tooltip="Vincular proporción"
               >
-                H
-              </ScrubLabel>
-              <input
-                type="number"
-                value={Math.round((p.scaleY ?? 1) * 100)}
-                onChange={(e) => setScale('scaleY', Number(e.target.value))}
-                className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-              />
-              <span className="text-muted-foreground font-mono text-[10px]">%</span>
+                {aspectLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+              </button>
+
+              <div className="flex-1 flex items-center gap-1 bg-secondary border border-border rounded-md px-2 h-7">
+                <ScrubLabel
+                  value={Math.round((p.scaleY ?? 1) * 100)}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => setScale('scaleY', v, false)}
+                  className="text-muted-foreground font-mono"
+                >
+                  H
+                </ScrubLabel>
+                <input
+                  type="number"
+                  value={Math.round((p.scaleY ?? 1) * 100)}
+                  onChange={(e) => setScale('scaleY', Number(e.target.value))}
+                  className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
+                />
+                <span className="text-muted-foreground font-mono text-[10px]">%</span>
+              </div>
             </div>
           </div>
 
           {/* Rotation & Opacity */}
-          <div className="grid grid-cols-2 gap-2 -mb-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground font-medium">Rotación</span>
-              {renderAnimToggle(['rotation'], 'rotación')}
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground font-medium">Opacidad</span>
-              {renderAnimToggle(['opacity'], 'opacidad')}
-            </div>
-          </div>
           <div className="grid grid-cols-2 gap-2">
-            <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
-              <ScrubLabel
-                value={Math.round(p.rotation || 0)}
-                onScrubStart={onStartScrub}
-                onChange={(v) => onUpdateLayerProperty(layerId, 'rotation', v, false)}
-                className="text-muted-foreground font-mono"
-              >
-                ∡
-              </ScrubLabel>
-              <input
-                type="number"
-                value={Math.round(p.rotation || 0)}
-                onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'rotation', Number(e.target.value))}
-                className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-              />
-              <span className="text-muted-foreground font-mono text-[10px]">°</span>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground font-medium">Rotación</span>
+                {renderAnimToggle(['rotation'], 'rotación')}
+              </div>
+              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
+                <ScrubLabel
+                  value={Math.round(p.rotation || 0)}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => onUpdateLayerProperty(layerId, 'rotation', v, false)}
+                  className="text-muted-foreground font-mono"
+                >
+                  ∡
+                </ScrubLabel>
+                <input
+                  type="number"
+                  value={Math.round(p.rotation || 0)}
+                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'rotation', Number(e.target.value))}
+                  className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
+                />
+                <span className="text-muted-foreground font-mono text-[10px]">°</span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1">
-              <ScrubLabel
-                value={Math.round((p.opacity ?? 1) * 100)}
-                min={0}
-                max={100}
-                onScrubStart={onStartScrub}
-                onChange={(v) => onUpdateLayerProperty(layerId, 'opacity', v / 100, false)}
-                className="text-muted-foreground font-mono"
-              >
-                Op
-              </ScrubLabel>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={Math.round((p.opacity ?? 1) * 100)}
-                onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'opacity', Number(e.target.value) / 100)}
-                className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-              />
-              <span className="text-muted-foreground font-mono text-[10px]">%</span>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground font-medium">Opacidad</span>
+                {renderAnimToggle(['opacity'], 'opacidad')}
+              </div>
+              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
+                <ScrubLabel
+                  value={Math.round((p.opacity ?? 1) * 100)}
+                  min={0}
+                  max={100}
+                  onScrubStart={onStartScrub}
+                  onChange={(v) => onUpdateLayerProperty(layerId, 'opacity', v / 100, false)}
+                  className="text-muted-foreground font-mono"
+                >
+                  Op
+                </ScrubLabel>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={Math.round((p.opacity ?? 1) * 100)}
+                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'opacity', Number(e.target.value) / 100)}
+                  className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
+                />
+                <span className="text-muted-foreground font-mono text-[10px]">%</span>
+              </div>
             </div>
           </div>
         </div>
@@ -740,7 +745,7 @@ export const Inspector: React.FC<InspectorProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleVertexEdit(layerId)}
-                className={`w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md border text-[11px] font-medium transition-colors ${
+                className={`w-full flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border text-[11px] font-medium transition-colors ${
                   vertexEditLayerId === layerId
                     ? 'bg-bento-blue text-white border-bento-blue'
                     : 'bg-secondary border-border text-foreground hover:bg-accent'
@@ -793,7 +798,7 @@ export const Inspector: React.FC<InspectorProps> = ({
               type="text"
               value={p.text || ''}
               onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'text', e.target.value)}
-              className="w-full bg-secondary border border-border rounded-md px-2 py-1.5 text-foreground"
+              className="w-full bg-secondary border border-border rounded-md px-2 h-7 text-foreground"
             />
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -810,7 +815,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   type="number"
                   value={p.fontSize || 32}
                   onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'fontSize', Number(e.target.value))}
-                  className="w-full bg-secondary border border-border rounded-md px-2 py-1 font-mono text-foreground"
+                  className="w-full bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
                 />
               </div>
               <div>
@@ -825,6 +830,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   ]}
                   onChange={(weight) => onUpdateLayerProperty(selectedLayer.id, 'fontWeight', weight)}
                   align="left"
+                  size="sm"
                   className="w-full font-mono"
                   menuClassName="w-full"
                   ariaLabel="Grosor"
@@ -857,7 +863,7 @@ export const Inspector: React.FC<InspectorProps> = ({
             </div>
             {renderPaintRow('stroke', '#1a1d23', 'Sin trazo')}
             <div
-              className={`flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 py-1 ${
+              className={`flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7 ${
                 isNoColor(p.stroke) ? 'opacity-50' : ''
               }`}
             >

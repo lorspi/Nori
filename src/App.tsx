@@ -52,6 +52,11 @@ import {
 import AboutNori from './components/AboutNori';
 import { useUI, ToastType } from './lib/ui';
 
+// Longest Space press that still counts as a tap (toggles playback); longer presses pan the canvas
+const SPACE_TAP_MAX_MS = 400;
+// Input types where Space types nothing, so it can still toggle playback
+const NON_TEXT_INPUT_TYPES = new Set(['number', 'range', 'color']);
+
 // Arrow key -> canvas direction
 const ARROW_DIRECTIONS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0],
@@ -118,6 +123,8 @@ export default function App() {
   const canvasMenuTokenRef = useRef(0);
 
   const lastFrameTimeRef = useRef<number | null>(null);
+  // Space: a short tap toggles playback; holding it pans the canvas
+  const spacePressRef = useRef<{ start: number; held: boolean } | null>(null);
   const projectRef = useRef<Project>(project);
   projectRef.current = project;
 
@@ -323,8 +330,13 @@ export default function App() {
         return;
       }
 
-      // Ignore if user is typing in an input
-      if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
+      // Ignore if user is typing in an input. Space still toggles playback from fields
+      // where it types nothing (numbers, sliders…), which keep the focus after editing.
+      const target = e.target as HTMLElement;
+      const isTextField =
+        ['SELECT', 'TEXTAREA'].includes(target.tagName) ||
+        (target instanceof HTMLInputElement && !NON_TEXT_INPUT_TYPES.has(target.type));
+      if (isTextField || (target.tagName === 'INPUT' && e.code !== 'Space')) {
         return;
       }
 
@@ -372,7 +384,7 @@ export default function App() {
           handleSeekKeyframe(direction);
         } else if (e.shiftKey) {
           e.preventDefault();
-          setCurrentTime(direction === 1 ? project.duration : 0);
+          handleSeek(direction === 1 ? project.duration : 0);
         } else {
           e.preventDefault();
           handleStepFrame(direction);
@@ -394,7 +406,11 @@ export default function App() {
 
       if (e.code === 'Space') {
         e.preventDefault();
-        setIsPlaying((prev) => !prev);
+        // Playback toggles on release, only after a short tap (see the keyup handler).
+        // Auto-repeat is ignored: its delay depends on the OS and can be shorter than a tap.
+        if (!e.repeat || !spacePressRef.current) {
+          spacePressRef.current = { start: e.timeStamp, held: false };
+        }
       } else if (e.code === 'KeyV') {
         setActiveTool('select');
       } else if (e.code === 'KeyH') {
@@ -416,8 +432,33 @@ export default function App() {
       }
     };
 
+    // Space released: toggle playback only if it was a short tap, not held down to pan
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      const press = spacePressRef.current;
+      spacePressRef.current = null;
+      if (!press) return;
+      e.preventDefault();
+      // Event timestamps, not the handler's run time: during playback the main thread
+      // is busy rendering and the handlers can run late
+      if (!press.held && e.timeStamp - press.start < SPACE_TAP_MAX_MS) {
+        setIsPlaying((prev) => !prev);
+      }
+    };
+
+    // Clicking while Space is down (to drag the canvas) means it is being held
+    const handlePointerDown = () => {
+      if (spacePressRef.current) spacePressRef.current.held = true;
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+    };
   });
 
   // Paste (Ctrl + V): Nori layers or keyframes, or SVG code as new layers
@@ -531,17 +572,24 @@ export default function App() {
     }
   };
 
+  // Moving the time cursor by hand stops playback
+  const handleSeek = (time: number) => {
+    setIsPlaying(false);
+    setCurrentTime(time);
+  };
+
   // Step one frame back (-1) or forward (1)
   const handleStepFrame = (direction: -1 | 1) => {
+    setIsPlaying(false);
     setCurrentTime((prev) =>
       Math.max(0, Math.min(project.duration, Number((prev + direction / project.fps).toFixed(3))))
     );
   };
 
-  // Jump to the previous / next keyframe of any layer
+  // Jump to the previous / next keyframe of the selected layers (of any layer when none is selected)
   const handleSeekKeyframe = (direction: -1 | 1) => {
-    const time = getAdjacentKeyframeTime(project, currentTime, direction);
-    if (time !== null) setCurrentTime(time);
+    const time = getAdjacentKeyframeTime(project, currentTime, direction, selectedLayerIds);
+    if (time !== null) handleSeek(time);
   };
 
   // Add / remove a keyframe at the given time on an animated property (toggle)
@@ -1478,7 +1526,7 @@ export default function App() {
         currentTime={currentTime}
         isPlaying={isPlaying}
         onTogglePlay={() => setIsPlaying((prev) => !prev)}
-        onSeek={setCurrentTime}
+        onSeek={handleSeek}
         selectedLayerId={selectedLayerId}
         selectedLayerIds={selectedLayerIds}
         onSelectLayer={setSelectedLayerId}
