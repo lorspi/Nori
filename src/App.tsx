@@ -38,6 +38,7 @@ import {
 } from './utils/clipboard';
 import { AnimationPreset, applyAnimationPreset, getPresetDistance, planPresetSpans } from './utils/animationPresets';
 import { getLayerPropertiesAtTime } from './utils/interpolator';
+import { AlignMode, computeAlignMoves } from './utils/alignment';
 import {
   createKeyframe,
   createTrack,
@@ -45,6 +46,7 @@ import {
   getAdjacentKeyframeTime,
   getLayerKeyframeRange,
   isSameKeyframeRef,
+  PAIRED_PROPERTIES,
   resolveKeyframeRefs,
   snapToFrame,
   sortKeyframes,
@@ -572,6 +574,28 @@ export default function App() {
     }
   };
 
+  // Align or distribute the selected layers (Inspector). One layer aligns to the canvas.
+  // Locked and hidden layers stay put and don't count. One undo step.
+  const handleAlignLayers = (mode: AlignMode) => {
+    const current = projectRef.current;
+    const ids = selectedLayerIds.length > 0 ? selectedLayerIds : selectedLayerId ? [selectedLayerId] : [];
+    const members = current.layers
+      .filter((l) => ids.includes(l.id) && l.visible && !l.locked)
+      .map((layer) => ({ layer, props: getLayerPropertiesAtTime(layer, currentTime) }));
+    const moves = computeAlignMoves(members, mode, current).filter(
+      (m) => Math.abs(m.dx) > 1e-3 || Math.abs(m.dy) > 1e-3
+    );
+    if (moves.length === 0) return;
+    recordHistory(current);
+    for (const move of moves) {
+      const props = members.find((m) => m.layer.id === move.layerId)!.props;
+      const changes: Partial<Layer['properties']> = {};
+      if (move.dx) changes.x = Number((props.x + move.dx).toFixed(2));
+      if (move.dy) changes.y = Number((props.y + move.dy).toFixed(2));
+      handleUpdateLayerProperties(move.layerId, changes, false);
+    }
+  };
+
   // Moving the time cursor by hand stops playback
   const handleSeek = (time: number) => {
     setIsPlaying(false);
@@ -629,7 +653,9 @@ export default function App() {
   };
 
   // Replaces a track's keyframes; removing the last keyframe disables the property's animation
-  // and keeps its current value as the static base value
+  // and keeps its current value as the static base value. In X / Y pairs (position, scale,
+  // anchor) the emptied track stays in the timeline while the other axis is animated, so
+  // keyframes can be added to it again; the pair goes away once both are empty.
   const replaceTrackKeyframes = (
     layer: Layer,
     property: string,
@@ -643,9 +669,18 @@ export default function App() {
       };
     }
     const current = getLayerPropertiesAtTime(layer, time);
+    const properties = { ...layer.properties, [property]: current[property as keyof typeof current] };
+    const partner = PAIRED_PROPERTIES[property as AnimatableProperty];
+    const partnerTrack = partner ? layer.tracks.find((t) => t.property === partner) : undefined;
+    if (partnerTrack && partnerTrack.keyframes.length > 0) {
+      return {
+        properties,
+        tracks: layer.tracks.map((t) => (t.property === property ? { ...t, keyframes: [] } : t)),
+      };
+    }
     return {
-      properties: { ...layer.properties, [property]: current[property as keyof typeof current] },
-      tracks: layer.tracks.filter((t) => t.property !== property),
+      properties,
+      tracks: layer.tracks.filter((t) => t.property !== property && t.property !== partner),
     };
   };
 
@@ -1409,8 +1444,32 @@ export default function App() {
     setSelectedLayerId(newLayer.id);
   };
 
+  // Alt + drag on the canvas: each layer gets a copy right above it, and the copies become the
+  // selection that the drag moves. The canvas records the undo step before calling this.
+  const handleDuplicateLayersForDrag = (layerIds: string[], primaryId: string): Record<string, string> => {
+    const stamp = Date.now();
+    const copies: Record<string, string> = {};
+    const layers: Layer[] = [];
+    projectRef.current.layers.forEach((layer, index) => {
+      layers.push(layer);
+      if (!layerIds.includes(layer.id)) return;
+      const copy: Layer = {
+        ...JSON.parse(JSON.stringify(layer)),
+        id: `layer_${stamp}_${index}`,
+        name: `${layer.name} Copia`,
+      };
+      copies[layer.id] = copy.id;
+      layers.push(copy);
+    });
+    setProject((prev) => ({ ...prev, layers }));
+    const ids = Object.values(copies);
+    handleSelectLayers(ids, copies[primaryId] ?? ids[ids.length - 1] ?? null);
+    setSelectedKeyframes([]);
+    return copies;
+  };
+
   // Delete Layer
-  const handleDeleteLayers = (layerIds: string[], silent = false) => {
+  const handleDeleteLayers =(layerIds: string[], silent = false) => {
     if (layerIds.length === 0) return;
     recordHistory(project);
 
@@ -1555,6 +1614,7 @@ export default function App() {
           onSelectLayers={handleSelectLayers}
           onUpdateLayerProperties={handleUpdateLayerProperties}
           onStartDragLayer={handleStartDrag}
+          onDuplicateLayersForDrag={handleDuplicateLayersForDrag}
           vertexEditLayerId={vertexEditLayerId}
           onToggleVertexEdit={handleToggleVertexEdit}
           onExitVertexEdit={() => setVertexEditLayerId(null)}
@@ -1585,6 +1645,7 @@ export default function App() {
           }}
           onDeleteLayer={handleDeleteLayer}
           onDuplicateLayer={handleDuplicateLayer}
+          onAlignLayers={handleAlignLayers}
           currentTime={currentTime}
         />
       </div>

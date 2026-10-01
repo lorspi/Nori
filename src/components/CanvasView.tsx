@@ -86,6 +86,9 @@ interface CanvasViewProps {
   onSelectLayers: (layerIds: string[], primaryId: string | null) => void;
   onUpdateLayerProperties: (layerId: string, properties: Partial<Layer['properties']>, recordUndo?: boolean) => void;
   onStartDragLayer?: () => void;
+  // Alt + drag: copies the layers (above each original) and returns old id -> copy id;
+  // the copies are selected and moved instead of the originals
+  onDuplicateLayersForDrag?: (layerIds: string[], primaryId: string) => Record<string, string>;
   activeTool: ToolMode;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
@@ -103,7 +106,19 @@ type Point = { x: number; y: number };
 // Every canvas interaction is one drag; its data is snapshotted at mouse down
 type Drag =
   | { kind: 'pan'; startClient: Point; startPan: Point }
-  | { kind: 'move'; startMouse: Point; members: { id: string; x: number; y: number }[] }
+  | {
+      kind: 'move';
+      startMouse: Point;
+      members: { id: string; x: number; y: number }[];
+      primaryId: string;
+      // Alt was held: the layers are copied once the drag starts (duplicated: already done)
+      duplicate: boolean;
+      duplicated: boolean;
+      // Past the click threshold: it's a drag, not a click
+      moved: boolean;
+      // Shift / Ctrl + click on a selected layer: the selection without it, applied if it was a click
+      deselectOnClick: string[] | null;
+    }
   | { kind: 'anchor'; layerId: string }
   | { kind: 'scale'; layerId: string; handle: SelectionHandle; start: LayerProperties }
   | { kind: 'rotate'; layerId: string; start: LayerProperties; startMouse: Point }
@@ -133,6 +148,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
   onSelectLayers,
   onUpdateLayerProperties,
   onStartDragLayer,
+  onDuplicateLayersForDrag,
   activeTool,
   zoom,
   setZoom,
@@ -681,14 +697,10 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     const hit = hitTestLayer(pt);
     if (hit) {
       const isSelected = selectedLayerIds.includes(hit.id);
-      if (additive) {
-        // Shift / Ctrl + click toggles the layer in the selection
-        const ids = isSelected ? selectedLayerIds.filter((id) => id !== hit.id) : [...selectedLayerIds, hit.id];
-        onSelectLayers(ids, isSelected ? (ids[0] ?? null) : hit.id);
-        return;
-      }
-
-      const ids = isSelected ? selectedLayerIds : [hit.id];
+      // Shift / Ctrl + click toggles the layer in the selection. An unselected layer is added
+      // right away; a selected one is removed on release, only if the mouse didn't move, since
+      // Shift + drag moves the selection along one axis.
+      const ids = isSelected ? selectedLayerIds : additive ? [...selectedLayerIds, hit.id] : [hit.id];
       onSelectLayers(ids, hit.id);
       const moving = ids
         .map((id) => project.layers.find((l) => l.id === id))
@@ -697,7 +709,16 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           const p = getLayerPropertiesAtTime(l, currentTime);
           return { id: l.id, x: p.x, y: p.y };
         });
-      setDrag({ kind: 'move', startMouse: pt, members: moving });
+      setDrag({
+        kind: 'move',
+        startMouse: pt,
+        members: moving,
+        primaryId: hit.id,
+        duplicate: e.altKey && !!onDuplicateLayersForDrag && moving.length > 0,
+        duplicated: false,
+        moved: false,
+        deselectOnClick: additive && isSelected ? selectedLayerIds.filter((id) => id !== hit.id) : null,
+      });
       return;
     }
 
@@ -759,8 +780,24 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           break;
         }
         case 'move': {
-          const dx = pt.x - d.startMouse.x;
-          const dy = pt.y - d.startMouse.y;
+          let dx = pt.x - d.startMouse.x;
+          let dy = pt.y - d.startMouse.y;
+          // Shift keeps the movement on the axis the cursor has moved the most along
+          if (e.shiftKey) {
+            if (Math.abs(dx) >= Math.abs(dy)) dy = 0;
+            else dx = 0;
+          }
+          // A few pixels of slack so a click (Shift + click, Alt + click) doesn't move anything
+          if (!d.moved) {
+            if (Math.hypot(pt.x - d.startMouse.x, pt.y - d.startMouse.y) * zoom < 3) break;
+            d.moved = true;
+          }
+          if (d.duplicate && !d.duplicated) {
+            recordOnce();
+            const copies = onDuplicateLayersForDrag!(d.members.map((m) => m.id), d.primaryId);
+            d.members = d.members.map((m) => ({ ...m, id: copies[m.id] ?? m.id }));
+            d.duplicated = true;
+          }
           recordOnce();
           for (const m of d.members) {
             onUpdateLayerProperties(m.id, { x: Math.round(m.x + dx), y: Math.round(m.y + dy) }, false);
@@ -840,6 +877,9 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       ) {
         onExitVertexEdit();
       }
+      if (d?.kind === 'move' && d.deselectOnClick && !d.moved) {
+        onSelectLayers(d.deselectOnClick, d.deselectOnClick[0] ?? null);
+      }
       if (d?.kind === 'handle' && d.brokeMirror) {
         setMirrorOverrides((prev) => ({ ...prev, [d.vertex]: 'none' }));
       }
@@ -853,7 +893,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
     };
-  }, [drag?.kind, project, currentTime, zoom, onStartDragLayer, onUpdateLayerProperties, onSelectLayers, onExitVertexEdit]);
+  }, [drag?.kind, project, currentTime, zoom, onStartDragLayer, onUpdateLayerProperties, onSelectLayers, onExitVertexEdit, onDuplicateLayersForDrag]);
 
   // Hover feedback: resize / rotate / anchor cursors over the selection
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -896,7 +936,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       case 'handle':
         return 'move';
       case 'move':
-        return 'default';
+        return drag.duplicate ? 'copy' : 'default';
     }
     return hoverCursor ?? 'default';
   })();

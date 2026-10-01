@@ -1,5 +1,49 @@
 # Changelog
 
+## [1.1.0] — 2026-10-01
+
+### Added
+
+- **Desenfoque de movimiento al renderizar video**
+  En la ventana de exportar, los formatos MP4 y WebM tienen la opción "Desenfoque de movimiento" con su Intensidad (10–100 %): la parte de cada fotograma en que el obturador queda abierto (50 % equivale a 180°, 100 % a 360°). Cada fotograma mezcla entre 4 y 16 instantes repartidos alrededor de su tiempo, así que lo que se mueve rápido deja una estela suave. El render tarda más, pero la duración del video no cambia. También funciona con fondo transparente en WebM.
+
+- **Sombra paralela y sombra interna**
+  En la sección Efectos del Inspector se puede añadir una Sombra paralela y una Sombra interna a cada capa, con color, opacidad, desplazamiento X e Y, desenfoque y extensión. La extensión agranda la sombra paralela (o la encoge con valores negativos) y lleva la sombra interna más hacia dentro. Las sombras giran y se escalan con la capa, se ven en el lienzo y se exportan a GIF, MP4, WebM y SVG. Los cambios se aplican a todas las capas seleccionadas. La sombra interna no está disponible en las capas de texto.
+
+- **Posición del trazo**
+  Junto al grosor del trazo, un desplegable define si el trazo va por dentro de la forma (Interior), centrado en el borde (Centro) o por fuera (Exterior). Las capas existentes conservan el trazo centrado.
+
+- **Opacidad del relleno y del trazo**
+  El relleno y el trazo tienen cada uno su campo de opacidad (en %), que se puede escribir o arrastrar desde su icono. Se animan junto con su color: el rombo de Relleno anima el color y la opacidad del relleno, y el de Trazo el color, la opacidad y el grosor.
+
+- **Alinear y distribuir capas**
+  Arriba del Inspector hay botones para alinear a la izquierda, al centro horizontal, a la derecha, arriba, al centro vertical y abajo. Con una capa seleccionada se alinea al lienzo; con varias, al recuadro que las contiene a todas. Con tres o más capas, "Distribuir horizontalmente" y "Distribuir verticalmente" dejan el mismo espacio entre ellas sin mover la primera ni la última. Se usan los bordes visibles de cada capa (también si está girada o escalada), las capas bloqueadas u ocultas no se mueven y cada acción se deshace en un solo paso. Si la posición está animada, se crea o actualiza el fotograma clave en el cursor de tiempo.
+
+- **Alt + arrastrar duplica la capa**
+  Al mantener Alt y arrastrar una capa en el lienzo, se crea una copia justo encima de cada capa seleccionada y lo que se mueve es la copia; el original queda en su sitio. Las copias quedan seleccionadas y todo se deshace en un solo paso. Alt + clic sin mover no copia nada.
+
+- **Shift + arrastrar limita el movimiento a un eje**
+  Al mantener Shift mientras se arrastra una capa, se mueve solo en horizontal o solo en vertical, según el eje en que el cursor se haya desplazado más. Se combina con Alt para duplicar en línea recta. Shift + clic sigue añadiendo o quitando la capa de la selección; sobre una capa ya seleccionada, la quita solo si no se arrastró.
+
+- **Pantalla para dispositivos móviles**
+  En teléfonos y tabletas pequeñas, Nori muestra una pantalla que indica que el editor está disponible solo para escritorio, porque necesita espacio para el lienzo, el Inspector y la línea del tiempo, además de teclado y ratón. "Continuar de todos modos" abre el editor igualmente durante esa sesión.
+
+### Changed
+
+- **Posición, Escala y Anclaje conservan las dos dimensiones**
+  Al borrar todos los fotogramas clave de una dimensión (por ejemplo, Posición X) mientras la otra sigue animada, su fila se mantiene vacía en la línea del tiempo en lugar de desaparecer, y se le pueden volver a agregar fotogramas clave sin desactivar la otra. La propiedad conserva el valor que tenía. Cuando las dos dimensiones se quedan sin fotogramas clave, la animación se desactiva como antes.
+
+- **Arrastrar una capa tiene un pequeño margen**
+  El arrastre empieza después de mover el cursor unos píxeles, así que un clic sobre una capa ya no la desplaza por accidente.
+
+### Fixed
+
+- **Desplegables tapados al final de un panel**
+  Los desplegables que no caben debajo (como el de la posición del trazo, al final del Inspector) se abren hacia arriba, en lugar de quedar ocultos detrás de la línea del tiempo.
+
+- **Botón de tema**
+  El botón para cambiar de tema ya no muestra la indicación al revés: en el tema oscuro dice "Cambiar a tema claro" y muestra el sol, y en el tema claro dice "Cambiar a tema oscuro" y muestra la luna. El icono y la indicación cambian en el momento de pulsarlo y también siguen al tema del sistema.
+
 ## [1.0.3] — 2026-10-01
 
 ### Added

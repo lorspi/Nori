@@ -4,6 +4,7 @@ import { IconContext } from '@phosphor-icons/react';
 import App from './App.tsx';
 import { UIProvider } from './lib/ui.tsx';
 import { TooltipLayer } from './components/Tooltip.tsx';
+import { DesktopOnlyGate } from './components/DesktopOnlyGate.tsx';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -12,7 +13,9 @@ createRoot(document.getElementById('root')!).render(
         icons still control their size via Tailwind width/height classes. */}
     <IconContext.Provider value={{ weight: 'duotone' }}>
       <UIProvider>
-        <App />
+        <DesktopOnlyGate>
+          <App />
+        </DesktopOnlyGate>
         <TooltipLayer />
       </UIProvider>
     </IconContext.Provider>

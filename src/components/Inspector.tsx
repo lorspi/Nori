@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  AlignBottom,
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignLeft,
+  AlignRight,
+  AlignTop,
   ArrowsInLineHorizontal,
+  Columns,
+  DropHalf,
+  Rows,
   Clock,
   Sliders,
   Lock,
@@ -16,7 +25,8 @@ import {
 } from '@phosphor-icons/react';
 import { ColorSwatch, isNoColor, useUndoSession } from './ColorSwatch';
 import { DEFAULT_SHAPE } from '../utils/pathGeometry';
-import { Layer, Project, EasingConfig, AnimatableProperty, KeyframeRef } from '../types/animation';
+import { Layer, Project, EasingConfig, AnimatableProperty, KeyframeRef, ShadowEffect, StrokeAlign } from '../types/animation';
+import { AlignMode } from '../utils/alignment';
 import { ScrubLabel } from './ScrubLabel';
 import { getLayerPropertiesAtTime } from '../utils/interpolator';
 import { CurveEditor } from './CurveEditor';
@@ -51,8 +61,36 @@ interface InspectorProps {
   onUpdateProjectSettings: (settings: Partial<Project>, recordUndo?: boolean) => void;
   onDeleteLayer: (layerId: string) => void;
   onDuplicateLayer: (layerId: string) => void;
+  // Align / distribute the selected layers (a single layer aligns to the canvas)
+  onAlignLayers: (mode: AlignMode) => void;
   currentTime: number;
 }
+
+// Values of a newly added shadow
+const DEFAULT_SHADOWS: Record<'dropShadow' | 'innerShadow', ShadowEffect> = {
+  dropShadow: { enabled: true, color: '#000000', opacity: 0.25, x: 0, y: 4, blur: 8, spread: 0 },
+  innerShadow: { enabled: true, color: '#000000', opacity: 0.25, x: 0, y: 2, blur: 4, spread: 0 },
+};
+
+const STROKE_ALIGN_OPTIONS: { value: StrokeAlign; label: string }[] = [
+  { value: 'inside', label: 'Interior' },
+  { value: 'center', label: 'Centro' },
+  { value: 'outside', label: 'Exterior' },
+];
+
+const ALIGN_BUTTONS: { mode: AlignMode; icon: React.ElementType; label: string }[] = [
+  { mode: 'left', icon: AlignLeft, label: 'Alinear a la izquierda' },
+  { mode: 'center-x', icon: AlignCenterHorizontal, label: 'Centrar horizontalmente' },
+  { mode: 'right', icon: AlignRight, label: 'Alinear a la derecha' },
+  { mode: 'top', icon: AlignTop, label: 'Alinear arriba' },
+  { mode: 'center-y', icon: AlignCenterVertical, label: 'Centrar verticalmente' },
+  { mode: 'bottom', icon: AlignBottom, label: 'Alinear abajo' },
+];
+
+const DISTRIBUTE_BUTTONS: { mode: AlignMode; icon: React.ElementType; label: string }[] = [
+  { mode: 'distribute-x', icon: Columns, label: 'Distribuir horizontalmente' },
+  { mode: 'distribute-y', icon: Rows, label: 'Distribuir verticalmente' },
+];
 
 // Layer name renamed in place, like the project title (click to edit, Enter to save, Esc to cancel)
 const LayerNameInput: React.FC<{ name: string; onRename: (name: string) => void }> = ({ name, onRename }) => {
@@ -109,6 +147,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   onUpdateProjectSettings,
   onDeleteLayer,
   onDuplicateLayer,
+  onAlignLayers,
   currentTime,
 }) => {
   const [aspectLocked, setAspectLocked] = useState(true);
@@ -296,6 +335,7 @@ export const Inspector: React.FC<InspectorProps> = ({
 
   // Color changes apply to every selected layer when the Inspector's layer is part of the selection
   const fillTargets = selectedLayerIds.includes(layerId) ? selectedLayerIds : [layerId];
+  const alignCount = fillTargets.length;
 
   // Keyframe icon: gray = not animated, blue = animated (filled when a keyframe sits on the current frame)
   const renderAnimToggle = (properties: AnimatableProperty[], label: string) => {
@@ -320,10 +360,140 @@ export const Inspector: React.FC<InspectorProps> = ({
     );
   };
 
+  // Small % field (fill, stroke and shadow opacity) with a draggable drop icon
+  const renderOpacityField = (
+    percent: number,
+    onChange: (percent: number, recordUndo?: boolean) => void,
+    label: string,
+    dimmed = false
+  ) => (
+    <div
+      className={`w-16 shrink-0 flex items-center gap-1 bg-secondary border border-border rounded-md px-1.5 h-7 ${dimmed ? 'opacity-50' : ''}`}
+      data-tooltip={label}
+    >
+      <ScrubLabel
+        value={percent}
+        min={0}
+        max={100}
+        onScrubStart={onStartScrub}
+        onChange={(v) => onChange(v, false)}
+        className="text-muted-foreground shrink-0"
+      >
+        <DropHalf className="w-3 h-3" />
+      </ScrubLabel>
+      <input
+        type="number"
+        min="0"
+        max="100"
+        value={percent}
+        onChange={(e) => {
+          if (e.target.value === '') return;
+          onChange(Number(e.target.value));
+        }}
+        className="w-full min-w-0 bg-transparent text-right font-mono text-foreground focus:outline-none"
+        aria-label={label}
+      />
+      <span className="text-muted-foreground font-mono text-[10px]">%</span>
+    </div>
+  );
+
+  // Drop / inner shadow: header with add / remove, then color, opacity, offset, blur and spread.
+  // Changes apply to every selected layer, like colors.
+  const renderShadow = (key: 'dropShadow' | 'innerShadow', label: string) => {
+    const shadow = p[key];
+    const on = !!shadow?.enabled;
+    const current = shadow ?? DEFAULT_SHADOWS[key];
+    const name = label.toLowerCase();
+    const update = (changes: Partial<ShadowEffect>, recordUndo = true) =>
+      onUpdateLayerProperties(fillTargets, { [key]: { ...current, enabled: true, ...changes } }, recordUndo);
+    const field = (prop: 'x' | 'y' | 'blur' | 'spread', fieldLabel: string, title: string, min?: number) => (
+      <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7" data-tooltip={title}>
+        <ScrubLabel
+          value={current[prop]}
+          step={0.5}
+          min={min}
+          onScrubStart={onStartScrub}
+          onChange={(v) => update({ [prop]: Number(v.toFixed(1)) }, false)}
+          className="text-muted-foreground text-[10px] whitespace-nowrap"
+        >
+          {fieldLabel}
+        </ScrubLabel>
+        <input
+          type="number"
+          min={min}
+          value={Number(current[prop].toFixed(1))}
+          onChange={(e) => {
+            if (e.target.value === '') return;
+            const v = Number(e.target.value);
+            update({ [prop]: min !== undefined ? Math.max(min, v) : v });
+          }}
+          className="w-full min-w-0 bg-transparent text-right font-mono text-foreground focus:outline-none"
+          aria-label={title}
+        />
+        <span className="text-muted-foreground font-mono text-[10px]">px</span>
+      </div>
+    );
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-muted-foreground font-medium">{label}</span>
+          <button
+            type="button"
+            onClick={() => onUpdateLayerProperties(fillTargets, { [key]: { ...current, enabled: !on } })}
+            className="p-0.5 rounded text-muted-foreground hover:text-foreground"
+            data-tooltip={on ? `Quitar ${name}` : `Añadir ${name}`}
+          >
+            {on ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+          </button>
+        </div>
+        {on && (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <ColorSwatch
+                value={current.color}
+                onChange={(color, recordUndo) => update({ color }, recordUndo)}
+                title={`Color de la ${name}`}
+              />
+              <input
+                type="text"
+                value={current.color}
+                onFocus={typingSession.begin}
+                onChange={(e) => update({ color: e.target.value.trim() || '#000000' }, typingSession.take())}
+                className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
+                aria-label={`Color de la ${name}`}
+              />
+              {renderOpacityField(
+                Math.round(current.opacity * 100),
+                (percent, recordUndo) => update({ opacity: Math.max(0, Math.min(100, percent)) / 100 }, recordUndo),
+                `Opacidad de la ${name}`
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {field('x', 'X', 'Desplazamiento horizontal')}
+              {field('y', 'Y', 'Desplazamiento vertical')}
+              {field('blur', 'Desenfoque', 'Desenfoque de la sombra', 0)}
+              {field(
+                'spread',
+                'Extensión',
+                key === 'dropShadow'
+                  ? 'Agranda la sombra (o la encoge, con valores negativos)'
+                  : 'Lleva la sombra más hacia dentro (o la acerca al borde, con valores negativos)'
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Color row: swatch, hex value and a button to remove or add the color back.
   // Changes apply to every selected layer when this layer is part of the selection.
   const renderPaintRow = (prop: 'fill' | 'stroke', defaultColor: string, emptyLabel: string) => {
     const value = p[prop];
+    const opacityProp = prop === 'fill' ? 'fillOpacity' : 'strokeOpacity';
+    const opacityLabel = prop === 'fill' ? 'Opacidad del relleno' : 'Opacidad del trazo';
+    const setOpacity = (percent: number, recordUndo = true) =>
+      onUpdateLayerProperty(fillTargets, opacityProp, Math.max(0, Math.min(100, percent)) / 100, recordUndo);
     const none = isNoColor(value);
     const key = `${layerId}:${prop}`;
     const setColor = (color: string, recordUndo = true) => {
@@ -343,6 +513,7 @@ export const Inspector: React.FC<InspectorProps> = ({
           onChange={(e) => setColor(e.target.value.trim() || 'transparent', typingSession.take())}
           className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground placeholder:text-muted-foreground"
         />
+        {renderOpacityField(Math.round((p[opacityProp] ?? 1) * 100), setOpacity, opacityLabel, none)}
         <button
           type="button"
           onClick={() => {
@@ -489,6 +660,41 @@ export const Inspector: React.FC<InspectorProps> = ({
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
+          </div>
+        </div>
+
+        {/* Align & distribute: to the canvas with one layer, to the selection with several */}
+        <div>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+            {alignCount > 1 ? `Alinear ${alignCount} capas` : 'Alinear al lienzo'}
+          </span>
+          <div className="flex items-center gap-1">
+            {ALIGN_BUTTONS.map(({ mode, icon: Icon, label }) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onAlignLayers(mode)}
+                className="w-7 h-7 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
+                data-tooltip={`${label} ${alignCount > 1 ? 'de la selección' : 'del lienzo'}`}
+                aria-label={label}
+              >
+                <Icon className="w-3.5 h-3.5" />
+              </button>
+            ))}
+            <span className="w-px h-5 bg-border mx-0.5" />
+            {DISTRIBUTE_BUTTONS.map(({ mode, icon: Icon, label }) => (
+              <button
+                key={mode}
+                type="button"
+                disabled={alignCount < 3}
+                onClick={() => onAlignLayers(mode)}
+                className="w-7 h-7 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+                data-tooltip={`${label}: mismo espacio entre las capas (selecciona 3 o más)`}
+                aria-label={label}
+              >
+                <Icon className="w-3.5 h-3.5" />
+              </button>
+            ))}
           </div>
         </div>
 
@@ -846,6 +1052,8 @@ export const Inspector: React.FC<InspectorProps> = ({
             unit: 'px',
             title: 'Desenfoque gaussiano',
           })}
+          {renderShadow('dropShadow', 'Sombra paralela')}
+          {selectedLayer.type !== 'text' && renderShadow('innerShadow', 'Sombra interna')}
         </div>
 
         {/* Text Layer specific attributes */}
@@ -910,7 +1118,7 @@ export const Inspector: React.FC<InspectorProps> = ({
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-muted-foreground font-medium">Relleno</span>
-              {renderAnimToggle(['fill'], 'relleno')}
+              {renderAnimToggle(['fill', 'fillOpacity'], 'relleno')}
             </div>
             {renderPaintRow('fill', '#0084ff', 'Sin relleno')}
           </div>
@@ -919,14 +1127,11 @@ export const Inspector: React.FC<InspectorProps> = ({
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-muted-foreground font-medium">Trazo</span>
-              {renderAnimToggle(['stroke', 'strokeWidth'], 'trazo')}
+              {renderAnimToggle(['stroke', 'strokeOpacity', 'strokeWidth'], 'trazo')}
             </div>
             {renderPaintRow('stroke', '#1a1d23', 'Sin trazo')}
-            <div
-              className={`flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7 ${
-                isNoColor(p.stroke) ? 'opacity-50' : ''
-              }`}
-            >
+            <div className={`grid grid-cols-2 gap-2 ${isNoColor(p.stroke) ? 'opacity-50' : ''}`}>
+              <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
               <ScrubLabel
                 value={p.strokeWidth || 0}
                 step={0.5}
@@ -948,6 +1153,19 @@ export const Inspector: React.FC<InspectorProps> = ({
                 data-tooltip="Grosor del trazo"
               />
               <span className="text-muted-foreground font-mono text-[10px]">px</span>
+              </div>
+              <Dropdown
+                value={selectedLayer.type === 'text' ? 'center' : (p.strokeAlign ?? 'center')}
+                options={STROKE_ALIGN_OPTIONS}
+                onChange={(strokeAlign) => onUpdateLayerProperties(fillTargets, { strokeAlign })}
+                align="left"
+                size="sm"
+                className="w-full"
+                menuClassName="w-full"
+                disabled={selectedLayer.type === 'text'}
+                title="Posición del trazo respecto al borde de la forma"
+                ariaLabel="Posición del trazo"
+              />
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { Layer, Project } from '../types/animation';
+import { Layer, LayerProperties, Project, ShadowEffect } from '../types/animation';
 import { getLayerPropertiesAtTime } from './interpolator';
 import {
   getGroupBox,
@@ -64,6 +64,240 @@ export function getCachedPath2D(pathData: string): Path2D {
   return cached;
 }
 
+// Layer outline in local coordinates (text has none: it is drawn with fillText)
+function getLayerPath(layer: Layer, p: LayerProperties): { path: Path2D; fillRule: CanvasFillRule } | null {
+  const w = p.width;
+  const h = p.height;
+  const halfW = w / 2;
+  const halfH = h / 2;
+  switch (layer.type) {
+    case 'rect':
+    case 'capsule': {
+      const path = new Path2D();
+      const r = layer.type === 'capsule' ? Math.min(halfW, halfH) : Math.max(0, Math.min(p.radius || 0, halfW, halfH));
+      if (r > 0) path.roundRect(-halfW, -halfH, w, h, r);
+      else path.rect(-halfW, -halfH, w, h);
+      return { path, fillRule: 'nonzero' };
+    }
+    case 'ellipse': {
+      const path = new Path2D();
+      path.ellipse(0, 0, Math.abs(halfW), Math.abs(halfH), 0, 0, Math.PI * 2);
+      return { path, fillRule: 'nonzero' };
+    }
+    case 'polygon':
+    case 'star': {
+      const d = getShapePathData(layer.type, p);
+      return d ? { path: getCachedPath2D(d), fillRule: 'nonzero' } : null;
+    }
+    case 'path':
+      return p.pathData ? { path: getCachedPath2D(p.pathData), fillRule: 'evenodd' } : null;
+    default:
+      return null;
+  }
+}
+
+const clamp01 = (v: number | undefined, fallback = 1) => Math.max(0, Math.min(1, v ?? fallback));
+
+// A shadow is only drawn when it is on and can be seen
+const activeShadow = (s: ShadowEffect | undefined) => (s && s.enabled && s.opacity > 0 ? s : null);
+
+const hasVisibleStroke = (p: LayerProperties) => !!p.stroke && p.stroke !== 'transparent' && p.strokeWidth > 0;
+
+/**
+ * Draws the layer's fill and stroke with the context's current transform. alpha multiplies
+ * the fill and stroke opacity. Inside / outside strokes are drawn twice as wide and clipped
+ * to the inside or the outside of the outline.
+ */
+function drawLayerContent(ctx: CanvasRenderingContext2D, layer: Layer, p: LayerProperties, alpha: number) {
+  const hasFill = !!p.fill && p.fill !== 'transparent';
+  const hasStroke = hasVisibleStroke(p);
+  if (!hasFill && !hasStroke) return;
+  const fillAlpha = alpha * clamp01(p.fillOpacity);
+  const strokeAlpha = alpha * clamp01(p.strokeOpacity);
+
+  ctx.fillStyle = p.fill || '#000000';
+  ctx.strokeStyle = p.stroke || 'transparent';
+  ctx.lineWidth = p.strokeWidth || 1;
+  // Basic shapes keep sharp corners; imported paths and text use round joins (as in the SVG export)
+  const roundJoins = layer.type === 'path' || layer.type === 'text';
+  ctx.lineJoin = roundJoins ? 'round' : 'miter';
+  ctx.lineCap = roundJoins ? 'round' : 'butt';
+
+  if (layer.type === 'text') {
+    ctx.font = `${p.fontWeight || '700'} ${p.fontSize || 32}px ${p.fontFamily || 'Sen, sans-serif'}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (hasFill) {
+      ctx.globalAlpha = fillAlpha;
+      ctx.fillText(p.text || '', 0, 0);
+    }
+    if (hasStroke) {
+      ctx.globalAlpha = strokeAlpha;
+      ctx.strokeText(p.text || '', 0, 0);
+    }
+    return;
+  }
+
+  const shape = getLayerPath(layer, p);
+  if (!shape) return;
+  if (hasFill && fillAlpha > 0) {
+    ctx.globalAlpha = fillAlpha;
+    ctx.fill(shape.path, shape.fillRule);
+  }
+  if (!hasStroke || strokeAlpha <= 0) return;
+  ctx.globalAlpha = strokeAlpha;
+  const align = p.strokeAlign ?? 'center';
+  if (align === 'center') {
+    ctx.stroke(shape.path);
+    return;
+  }
+  ctx.save();
+  ctx.lineWidth = p.strokeWidth * 2;
+  if (align === 'inside') {
+    ctx.clip(shape.path, shape.fillRule);
+  } else {
+    // Everything but the shape: a rectangle around it with the outline as a hole
+    const b = getLayerLocalBounds(layer, p);
+    const pad = p.strokeWidth * 12 + 10; // room for miter joins
+    const outside = new Path2D();
+    outside.rect(b.minX - pad, b.minY - pad, b.width + pad * 2, b.height + pad * 2);
+    outside.addPath(shape.path);
+    ctx.clip(outside, 'evenodd');
+  }
+  ctx.stroke(shape.path);
+  ctx.restore();
+}
+
+// Reusable full-size canvases for layers with shadows (one per role)
+const scratchCanvases: HTMLCanvasElement[] = [];
+function getScratch(index: number, width: number, height: number): CanvasRenderingContext2D {
+  let canvas = scratchCanvases[index];
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    scratchCanvases[index] = canvas;
+  }
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const ctx = canvas.getContext('2d')!;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.filter = 'none';
+  ctx.clearRect(0, 0, width, height);
+  return ctx;
+}
+
+// How far the visible stroke reaches past the outline
+const strokeOutset = (p: LayerProperties) => {
+  if (!hasVisibleStroke(p)) return 0;
+  const align = p.strokeAlign ?? 'center';
+  return align === 'outside' ? p.strokeWidth : align === 'center' ? p.strokeWidth / 2 : 0;
+};
+
+/**
+ * Silhouette of the content for a shadow: the content's alpha, grown (spread > 0) or
+ * shrunk (spread < 0) by stroking the outline. Drawn into target with the identity transform.
+ */
+function drawShadowSilhouette(
+  target: CanvasRenderingContext2D,
+  content: HTMLCanvasElement,
+  layer: Layer,
+  p: LayerProperties,
+  m: DOMMatrix,
+  spread: number
+) {
+  target.drawImage(content, 0, 0);
+  const shape = spread !== 0 ? getLayerPath(layer, p) : null;
+  if (!shape) return;
+  target.save();
+  target.setTransform(m);
+  target.lineJoin = 'round';
+  target.lineCap = 'round';
+  target.strokeStyle = '#000000';
+  target.fillStyle = '#000000';
+  if (spread > 0) {
+    target.lineWidth = (spread + strokeOutset(p)) * 2;
+    target.stroke(shape.path);
+    target.fill(shape.path, shape.fillRule);
+  } else {
+    target.globalCompositeOperation = 'destination-out';
+    target.lineWidth = -spread * 2;
+    target.stroke(shape.path);
+  }
+  target.restore();
+}
+
+/**
+ * Layers with a drop or inner shadow are drawn on their own canvas first (in device pixels)
+ * and then composited with the layer's opacity and blur: shadow, content, inner shadow on top.
+ */
+function renderLayerWithShadows(
+  ctx: CanvasRenderingContext2D,
+  layer: Layer,
+  p: LayerProperties,
+  drop: ShadowEffect | null,
+  inner: ShadowEffect | null,
+  opacity: number,
+  blur: number
+) {
+  const m = ctx.getTransform();
+  const W = ctx.canvas.width;
+  const H = ctx.canvas.height;
+  const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+  // Offsets are in layer units: they turn and scale with the layer
+  const offset = (s: ShadowEffect) => ({ x: m.a * s.x + m.c * s.y, y: m.b * s.x + m.d * s.y });
+  const blurFilter = (s: ShadowEffect) => (s.blur > 0 ? `blur(${((s.blur / 2) * scale).toFixed(2)}px)` : 'none');
+
+  const content = getScratch(0, W, H);
+  content.setTransform(m);
+  drawLayerContent(content, layer, p, 1);
+
+  const group = getScratch(1, W, H);
+
+  if (drop) {
+    const sil = getScratch(2, W, H);
+    drawShadowSilhouette(sil, content.canvas, layer, p, m, drop.spread);
+    sil.globalCompositeOperation = 'source-in';
+    sil.globalAlpha = clamp01(drop.opacity);
+    sil.fillStyle = drop.color;
+    sil.fillRect(0, 0, W, H);
+    const o = offset(drop);
+    group.filter = blurFilter(drop);
+    group.drawImage(sil.canvas, o.x, o.y);
+    group.filter = 'none';
+  }
+
+  group.drawImage(content.canvas, 0, 0);
+
+  if (inner) {
+    // Shadow color everywhere except the shifted, blurred silhouette, kept inside the content
+    const sil = getScratch(2, W, H);
+    drawShadowSilhouette(sil, content.canvas, layer, p, m, -inner.spread);
+    const shade = getScratch(3, W, H);
+    shade.globalAlpha = clamp01(inner.opacity);
+    shade.fillStyle = inner.color;
+    shade.fillRect(0, 0, W, H);
+    shade.globalAlpha = 1;
+    shade.globalCompositeOperation = 'destination-out';
+    const o = offset(inner);
+    shade.filter = blurFilter(inner);
+    shade.drawImage(sil.canvas, o.x, o.y);
+    shade.filter = 'none';
+    shade.globalCompositeOperation = 'destination-in';
+    shade.drawImage(content.canvas, 0, 0);
+    group.drawImage(shade.canvas, 0, 0);
+  }
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = opacity;
+  if (blur > 0) ctx.filter = `blur(${(blur * scale).toFixed(2)}px)`;
+  ctx.drawImage(group.canvas, 0, 0);
+  ctx.restore();
+}
+
 /**
  * Renders a single layer to canvas context at time t
  */
@@ -97,87 +331,24 @@ export function renderLayer(
     }
     ctx.scale(p.scaleX ?? 1, p.scaleY ?? 1);
   }
-  ctx.globalAlpha = Math.max(0, Math.min(1, p.opacity ?? 1));
-
+  const opacity = clamp01(p.opacity);
   // Gaussian blur, measured in layer units like in the SVG export (scales with the layer and zoom)
   const blur = Math.max(0, Number(p.blur) || 0);
+
+  const drop = activeShadow(p.dropShadow);
+  const inner = layer.type === 'text' ? null : activeShadow(p.innerShadow);
+  if ((drop || inner) && opacity > 0) {
+    renderLayerWithShadows(ctx, layer, p, drop, inner, opacity, blur);
+    ctx.restore();
+    return;
+  }
+
   if (blur > 0) {
     const m = ctx.getTransform();
     const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
     ctx.filter = `blur(${(blur * scale).toFixed(2)}px)`;
   }
-
-  // Style ('transparent' means no fill / no stroke)
-  const hasFill = !!p.fill && p.fill !== 'transparent';
-  const hasStroke = !!p.stroke && p.stroke !== 'transparent' && p.strokeWidth > 0;
-  ctx.fillStyle = p.fill || '#000000';
-  ctx.strokeStyle = p.stroke || 'transparent';
-  ctx.lineWidth = p.strokeWidth || 1;
-  // Basic shapes keep sharp corners; imported paths and text use round joins (as in the SVG export)
-  const roundJoins = layer.type === 'path' || layer.type === 'text';
-  ctx.lineJoin = roundJoins ? 'round' : 'miter';
-  ctx.lineCap = roundJoins ? 'round' : 'butt';
-
-  const paint = (path?: Path2D, fillRule: CanvasFillRule = 'nonzero') => {
-    if (path) {
-      if (hasFill) ctx.fill(path, fillRule);
-      if (hasStroke) ctx.stroke(path);
-    } else {
-      if (hasFill) ctx.fill(fillRule);
-      if (hasStroke) ctx.stroke();
-    }
-  };
-
-  const w = p.width;
-  const h = p.height;
-  const halfW = w / 2;
-  const halfH = h / 2;
-
-  switch (layer.type) {
-    case 'rect':
-    case 'capsule': {
-      ctx.beginPath();
-      const r = layer.type === 'capsule' ? Math.min(halfW, halfH) : Math.max(0, Math.min(p.radius || 0, halfW, halfH));
-      if (r > 0) {
-        ctx.roundRect(-halfW, -halfH, w, h, r);
-      } else {
-        ctx.rect(-halfW, -halfH, w, h);
-      }
-      paint();
-      break;
-    }
-
-    case 'ellipse': {
-      ctx.beginPath();
-      ctx.ellipse(0, 0, Math.abs(halfW), Math.abs(halfH), 0, 0, Math.PI * 2);
-      paint();
-      break;
-    }
-
-    case 'polygon':
-    case 'star': {
-      const d = getShapePathData(layer.type, p);
-      if (d) paint(getCachedPath2D(d));
-      break;
-    }
-
-    case 'text': {
-      const fontSize = p.fontSize || 32;
-      const fontWeight = p.fontWeight || '700';
-      const fontFamily = p.fontFamily || 'Sen, sans-serif';
-      ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      if (hasFill) ctx.fillText(p.text || '', 0, 0);
-      if (hasStroke) ctx.strokeText(p.text || '', 0, 0);
-      break;
-    }
-
-    case 'path': {
-      if (p.pathData) paint(getCachedPath2D(p.pathData), 'evenodd');
-      break;
-    }
-  }
+  drawLayerContent(ctx, layer, p, opacity);
 
   ctx.restore();
 }

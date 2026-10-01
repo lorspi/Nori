@@ -11,7 +11,9 @@ export const PROPERTY_META: Record<AnimatableProperty, { label: string; unit: st
   rotation: { label: 'Rotación', unit: '°' },
   opacity: { label: 'Opacidad', unit: '%' },
   fill: { label: 'Relleno', unit: '' },
+  fillOpacity: { label: 'Opacidad del relleno', unit: '%' },
   stroke: { label: 'Trazo', unit: '' },
+  strokeOpacity: { label: 'Opacidad del trazo', unit: '%' },
   strokeWidth: { label: 'Grosor de trazo', unit: 'px' },
   radius: { label: 'Radio de esquinas', unit: 'px' },
   width: { label: 'Ancho', unit: 'px' },
@@ -20,7 +22,17 @@ export const PROPERTY_META: Record<AnimatableProperty, { label: string; unit: st
   pathData: { label: 'Forma (vértices)', unit: '' },
 };
 
-export const ANIMATABLE_PROPERTIES = Object.keys(PROPERTY_META) as AnimatableProperty[];
+// Properties animated together as an X / Y pair (each one points to the other axis)
+export const PAIRED_PROPERTIES: Partial<Record<AnimatableProperty, AnimatableProperty>> = {
+  x: 'y',
+  y: 'x',
+  scaleX: 'scaleY',
+  scaleY: 'scaleX',
+  anchorX: 'anchorY',
+  anchorY: 'anchorX',
+};
+
+export const ANIMATABLE_PROPERTIES =Object.keys(PROPERTY_META) as AnimatableProperty[];
 
 export const isAnimatableProperty = (prop: string): prop is AnimatableProperty =>
   prop in PROPERTY_META;

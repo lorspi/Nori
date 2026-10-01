@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CaretDown as ChevronDown, Check } from '@phosphor-icons/react';
 
 export interface DropdownOption<T> {
@@ -48,7 +48,33 @@ export function Dropdown<T>({
   disabled = false,
 }: DropdownProps<T>) {
   const [open, setOpen] = useState(false);
+  // The menu opens upwards when it doesn't fit below (end of the window or of a scrolling panel)
+  const [openUp, setOpenUp] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setOpenUp(false);
+      return;
+    }
+    const root = rootRef.current;
+    const menu = menuRef.current;
+    if (!root || !menu) return;
+    // Visible area: the window, narrowed by every ancestor that clips its content
+    let top = 0;
+    let bottom = window.innerHeight;
+    for (let el = root.parentElement; el; el = el.parentElement) {
+      const { overflowY } = getComputedStyle(el);
+      if (overflowY === 'visible') continue;
+      const rect = el.getBoundingClientRect();
+      top = Math.max(top, rect.top);
+      bottom = Math.min(bottom, rect.bottom);
+    }
+    const trigger = root.getBoundingClientRect();
+    const height = menu.offsetHeight + 4;
+    setOpenUp(trigger.bottom + height > bottom && trigger.top - height >= top);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -92,7 +118,8 @@ export function Dropdown<T>({
 
       {open && !disabled && (
         <div
-          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 z-50 text-foreground ${menuClassName}`}
+          ref={menuRef}
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} ${openUp ? 'bottom-full mb-1' : 'top-full mt-1'} bg-popover border border-border rounded-xl shadow-card-hover py-1 z-50 text-foreground ${menuClassName}`}
           role="listbox"
         >
           {options.map((option, idx) => {

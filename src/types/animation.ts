@@ -48,7 +48,9 @@ export type AnimatableProperty =
   | 'rotation'
   | 'opacity'
   | 'fill'
+  | 'fillOpacity'
   | 'stroke'
+  | 'strokeOpacity'
   | 'strokeWidth'
   | 'radius'
   | 'width'
@@ -73,6 +75,20 @@ export interface PropertyTrack {
 // 'capsule' and 'text' can no longer be added, but older projects and SVG imports still use them
 export type LayerType = 'rect' | 'ellipse' | 'polygon' | 'star' | 'path' | 'capsule' | 'text' | 'group';
 
+// Where the stroke sits relative to the outline
+export type StrokeAlign = 'center' | 'inside' | 'outside';
+
+// Drop / inner shadow, in layer units (they move, rotate and scale with the layer)
+export interface ShadowEffect {
+  enabled: boolean;
+  color: string;   // hex
+  opacity: number; // 0..1
+  x: number;       // offset
+  y: number;
+  blur: number;    // blur radius (like CSS box-shadow: the gaussian deviation is half of it)
+  spread: number;  // grows (drop) or shrinks (inner) the shape before blurring
+}
+
 export interface LayerProperties {
   x: number;
   y: number;
@@ -86,12 +102,17 @@ export interface LayerProperties {
   opacity: number;  // 0 to 1
   fill: string;   // 'transparent' = no fill
   stroke: string; // 'transparent' = no stroke
+  fillOpacity?: number;   // 0..1, multiplies the fill color (1 when missing)
+  strokeOpacity?: number; // 0..1, multiplies the stroke color (1 when missing)
   strokeWidth: number;
+  strokeAlign?: StrokeAlign; // 'center' when missing
   radius: number; // corner radius (rect, polygon, star)
   sides?: number;       // polygon
   points?: number;      // star
   innerRadius?: number; // star: inner / outer radius (0..1)
   blur?: number;        // gaussian blur in px
+  dropShadow?: ShadowEffect;
+  innerShadow?: ShadowEffect;
   text?: string;
   fontSize?: number;
   fontWeight?: string;
@@ -133,6 +154,9 @@ export interface ExportSettings {
   transparent: boolean;
   backgroundColor: string;
   loop: number; // 0 for infinite in GIF
+  // Motion blur for video (MP4 / WebM): fraction of each frame the shutter stays open
+  // (0 = off, 0.5 = 180°, 1 = 360°)
+  motionBlur?: number;
 }
 
 // Reference to a single keyframe inside a layer's property track

@@ -327,6 +327,9 @@ export function interpolateTrackValue(
  */
 export function getLayerPropertiesAtTime(layer: Layer, currentTime: number) {
   const result = { ...layer.properties };
+  // Older layers have no fill / stroke opacity: fully opaque
+  result.fillOpacity ??= 1;
+  result.strokeOpacity ??= 1;
 
   for (const track of layer.tracks) {
     const propName = track.property as keyof typeof result;

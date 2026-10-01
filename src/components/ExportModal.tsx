@@ -11,9 +11,10 @@ import {
   Checkerboard as Grid,
   Trash,
   Eye,
+  Wind,
 } from '@phosphor-icons/react';
 import { ExportFormat, ExportSettings, Project } from '../types/animation';
-import { exportProject, ExportProgress } from '../utils/videoExporter';
+import { exportProject, ExportProgress, motionBlurSamples } from '../utils/videoExporter';
 import { exportToAnimatedSvg } from '../utils/svgExporter';
 import { ColorSwatch } from './ColorSwatch';
 import { Dropdown } from './Dropdown';
@@ -49,6 +50,7 @@ interface RenderResult {
   width: number;
   height: number;
   fps: number;
+  motionBlur: number; // shutter used (0 = off)
   // Signature of the project it was made from, to warn when the project has changed since
   signature: string;
 }
@@ -81,6 +83,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
   const [transparent, setTransparent] = useState<boolean>(false);
   const [backgroundColor, setBackgroundColor] = useState<string>(project.backgroundColor || '#ffffff');
   const [loop] = useState<number>(0);
+  // Motion blur (MP4 / WebM only): on / off and shutter intensity in %
+  const [motionBlurOn, setMotionBlurOn] = useState<boolean>(false);
+  const [motionBlurIntensity, setMotionBlurIntensity] = useState<number>(50);
 
   // Sync with project on open
   useEffect(() => {
@@ -124,6 +129,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
   const raster = isSvg ? null : (format as RasterFormat);
   const render = raster ? renders[raster] : undefined;
   const error = raster ? errors[raster] : undefined;
+  const isVideo = format === 'mp4' || format === 'webm';
+  const motionBlur = isVideo && motionBlurOn ? motionBlurIntensity / 100 : 0;
   const isRenderingThis = !!exporting && exporting.format === format;
   const baseName = project.title.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'nori_animation';
 
@@ -133,7 +140,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
     setExporting({ format: target, progress: null });
     setErrors((prev) => ({ ...prev, [target]: undefined }));
 
-    const settings: ExportSettings = { format: target, fps, scale, transparent, backgroundColor, loop };
+    const settings: ExportSettings = { format: target, fps, scale, transparent, backgroundColor, loop, motionBlur };
     try {
       const { blob, filename } = await exportProject(project, settings, (progress) =>
         setExporting({ format: target, progress })
@@ -145,6 +152,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
         width: Math.round(project.width * scale),
         height: Math.round(project.height * scale),
         fps,
+        motionBlur,
         signature: projectSignature(project),
       };
       setRenders((prev) => {
@@ -209,6 +217,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
               <Eye className="w-3.5 h-3.5 text-bento-blue shrink-0" />
               <span className="truncate">
                 Render {formatLabel} · {render.width} × {render.height} · {render.fps} FPS
+                {render.motionBlur > 0 && ` · Desenfoque ${Math.round(render.motionBlur * 100)}%`}
               </span>
             </span>
             <span className="flex items-center gap-2 shrink-0">
@@ -365,6 +374,50 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                   ariaLabel="Velocidad (FPS)"
                 />
               </div>
+
+              {/* Motion blur (video formats) */}
+              {isVideo && (
+                <div className="pt-3 border-t border-border space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="motion-blur-chk"
+                      checked={motionBlurOn}
+                      onChange={(e) => setMotionBlurOn(e.target.checked)}
+                      className="app-checkbox w-4 h-4"
+                    />
+                    <label htmlFor="motion-blur-chk" className="text-foreground font-medium cursor-pointer flex items-center gap-1.5">
+                      <Wind className="w-3.5 h-3.5 text-bento-blue" />
+                      <span>Desenfoque de movimiento</span>
+                    </label>
+                  </div>
+                  {motionBlurOn && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="motion-blur-range" className="text-muted-foreground">Intensidad</label>
+                        <span className="font-mono text-foreground">
+                          {motionBlurIntensity}% · {Math.round(motionBlurIntensity * 3.6)}°
+                        </span>
+                      </div>
+                      <input
+                        id="motion-blur-range"
+                        type="range"
+                        min="10"
+                        max="100"
+                        step="5"
+                        value={motionBlurIntensity}
+                        onChange={(e) => setMotionBlurIntensity(Number(e.target.value))}
+                        className="w-full accent-bento-blue h-1 bg-muted rounded-md cursor-pointer"
+                        aria-label="Intensidad del desenfoque de movimiento"
+                      />
+                      <p className="text-[10px] text-muted-foreground leading-snug">
+                        Parte de cada fotograma en que el obturador queda abierto (100% = 360°). Se mezclan{' '}
+                        {motionBlurSamples(motionBlurIntensity / 100)} instantes por fotograma, así que el render tarda más.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Transparency and background color */}
               <div className="pt-3 border-t border-border space-y-2.5">

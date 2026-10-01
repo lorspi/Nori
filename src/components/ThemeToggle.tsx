@@ -10,18 +10,10 @@ type Theme = 'light' | 'dark' | 'system';
 
 const THEME_KEY = 'nori-theme';
 
-function getSystemTheme(): 'light' | 'dark' {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
+const DARK_QUERY = '(prefers-color-scheme: dark)';
 
-function applyTheme(theme: Theme) {
-  const root = document.documentElement;
-  if (theme === 'system') {
-    const resolved = getSystemTheme();
-    root.classList.toggle('dark', resolved === 'dark');
-  } else {
-    root.classList.toggle('dark', theme === 'dark');
-  }
+function getSystemTheme(): 'light' | 'dark' {
+  return window.matchMedia(DARK_QUERY).matches ? 'dark' : 'light';
 }
 
 export default function ThemeToggle() {
@@ -32,37 +24,39 @@ export default function ThemeToggle() {
       return 'system';
     }
   });
+  // Followed while the theme is 'system'
+  const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(getSystemTheme);
 
   useEffect(() => {
-    applyTheme(theme);
+    const mq = window.matchMedia(DARK_QUERY);
+    const handler = () => setSystemTheme(mq.matches ? 'dark' : 'light');
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  // Theme in use, worked out from state so the button and the page always agree
+  const resolved = theme === 'system' ? systemTheme : theme;
+  const isDark = resolved === 'dark';
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark);
+  }, [isDark]);
+
+  useEffect(() => {
     try {
       localStorage.setItem(THEME_KEY, theme);
     } catch {}
   }, [theme]);
 
-  // Listen for system theme changes when in system mode
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = () => {
-      if (theme === 'system') applyTheme('system');
-    };
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, [theme]);
+  const label = isDark ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro';
 
-  const toggleTheme = () => {
-    const isDark = document.documentElement.classList.contains('dark');
-    setTheme(isDark ? 'light' : 'dark');
-  };
-
-  const isDark = document.documentElement.classList.contains('dark');
-
+  // The icon shows the theme the button switches to: the sun in dark mode, the moon in light mode
   return (
     <button
-      onClick={toggleTheme}
+      onClick={() => setTheme(isDark ? 'light' : 'dark')}
       className="w-8 h-8 rounded-lg bg-card border border-border shadow-card flex items-center justify-center text-foreground hover:bg-accent transition-all duration-300 ease-out cursor-pointer"
-      data-tooltip={isDark ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'}
-      aria-label="Alternar tema claro/oscuro"
+      data-tooltip={label}
+      aria-label={label}
     >
       {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
     </button>
