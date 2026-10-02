@@ -11,6 +11,7 @@ import {
   getParentWorldMatrix,
   IDENTITY,
   invertAffine,
+  isContainerLayer,
   layerMatrix,
   multiplyAffine,
   normalizeLayerTree,
@@ -19,8 +20,9 @@ import {
   withDescendants,
 } from './layerTree';
 import { getGroupBox } from './transformHandles';
+import { t } from '../i18n';
 
-/** Editing operations on boolean groups and on layer subtrees (pure: they return new layers) */
+/** Editing operations on groups, boolean groups and layer subtrees (pure: they return new layers) */
 
 export const BOOLEAN_OPERATIONS: BooleanOperation[] = ['union', 'subtract', 'intersect', 'exclude'];
 
@@ -73,10 +75,10 @@ export type BooleanEditResult = { layers: Layer[]; selectId: string } | { error:
  */
 export function createBooleanGroup(layers: Layer[], ids: string[], op: BooleanOperation, time: number): BooleanEditResult {
   const members = getBooleanCandidates(layers, ids);
-  if (members.length < 2) return { error: 'Selecciona al menos dos formas para combinarlas' };
+  if (members.length < 2) return { error: t('Selecciona al menos dos formas para combinarlas') };
   const parentId = members[0].parentId;
   if (!members.every((m) => m.parentId === parentId)) {
-    return { error: 'Las formas deben estar en el mismo grupo para combinarlas' };
+    return { error: t('Las formas deben estar en el mismo grupo para combinarlas') };
   }
 
   const box = getGroupBox(members.map((m) => ({ layer: m, props: getLayerPropertiesAtTime(m, time) })));
@@ -87,7 +89,7 @@ export function createBooleanGroup(layers: Layer[], ids: string[], op: BooleanOp
 
   const group: Layer = {
     id: newId(),
-    name: `${BOOLEAN_LABELS[op].name} ${count}`,
+    name: `${t(BOOLEAN_LABELS[op].name)} ${count}`,
     type: 'boolean',
     booleanOp: op,
     ...(parentId ? { parentId } : {}),
@@ -134,12 +136,77 @@ export function createBooleanGroup(layers: Layer[], ids: string[], op: BooleanOp
   return { layers: normalizeLayerTree(next), selectId: group.id };
 }
 
+/**
+ * Puts the selected layers (with everything inside them) into a new plain group, right where the
+ * front-most of them was. Unlike a boolean group, each layer keeps its own style, effects and
+ * animation; the group adds a transform and an opacity that apply to all of them. The group
+ * sits at the center of their box, so it turns and scales around it.
+ */
+export function createLayerGroup(layers: Layer[], ids: string[], time: number): BooleanEditResult {
+  const tops = new Set(topLevelIds(layers, ids));
+  const members = layers.filter((l) => tops.has(l.id));
+  if (members.length === 0) return { error: t('Selecciona una o más capas para agruparlas') };
+  const parentId = members[0].parentId;
+  if (!members.every((m) => m.parentId === parentId)) {
+    return { error: t('Las capas deben estar en el mismo grupo para agruparlas') };
+  }
+
+  const box = getGroupBox(members.map((m) => ({ layer: m, props: getLayerPropertiesAtTime(m, time) })));
+  const gx = Math.round((box.minX + box.maxX) / 2);
+  const gy = Math.round((box.minY + box.maxY) / 2);
+  const count = layers.filter((l) => l.type === 'group').length + 1;
+
+  const group: Layer = {
+    id: newId(),
+    name: `${t('Grupo')} ${count}`,
+    type: 'group',
+    ...(parentId ? { parentId } : {}),
+    visible: true,
+    locked: false,
+    inTime: Math.min(...members.map((m) => m.inTime)),
+    outTime: Math.max(...members.map((m) => m.outTime)),
+    expanded: true,
+    properties: {
+      x: gx,
+      y: gy,
+      width: Math.max(1, Math.round(box.maxX - box.minX)),
+      height: Math.max(1, Math.round(box.maxY - box.minY)),
+      scaleX: 1,
+      scaleY: 1,
+      rotation: 0,
+      opacity: 1,
+      fill: 'transparent',
+      stroke: 'transparent',
+      strokeWidth: 0,
+      radius: 0,
+    },
+    tracks: [],
+  };
+
+  // The members keep their place on the canvas: their coordinates become relative to the group
+  const toGroup = translation(-gx, -gy);
+  const memberIds = new Set(members.map((m) => m.id));
+  const front = members[members.length - 1].id;
+  const next: Layer[] = [];
+  for (const layer of layers) {
+    if (layer.id === front) {
+      next.push(group, ...members.map((m) => ({ ...transformLayerPose(m, toGroup), parentId: group.id })));
+    } else if (!memberIds.has(layer.id)) {
+      next.push(layer);
+    }
+  }
+  // normalizeLayerTree puts the members' own children back right after them
+  return { layers: normalizeLayerTree(next), selectId: group.id };
+}
+
 /** Changes the operation of a boolean group (its name follows when it still has the default one) */
 export function setBooleanOperation(layers: Layer[], groupId: string, op: BooleanOperation): Layer[] {
   return layers.map((l) => {
     if (l.id !== groupId || l.type !== 'boolean') return l;
-    const defaultName = BOOLEAN_OPERATIONS.map((o) => BOOLEAN_LABELS[o].name).find((n) => l.name === n || l.name.startsWith(`${n} `));
-    const name = defaultName ? l.name.replace(defaultName, BOOLEAN_LABELS[op].name) : l.name;
+    // Default names in either language
+    const names = BOOLEAN_OPERATIONS.flatMap((o) => [BOOLEAN_LABELS[o].name, t(BOOLEAN_LABELS[o].name)]);
+    const defaultName = names.find((n) => l.name === n || l.name.startsWith(`${n} `));
+    const name = defaultName ? l.name.replace(defaultName, t(BOOLEAN_LABELS[op].name)) : l.name;
     return { ...l, booleanOp: op, name };
   });
 }
@@ -150,10 +217,10 @@ export function setBooleanOperation(layers: Layer[], groupId: string, op: Boolea
  */
 export function flattenBooleanGroup(layers: Layer[], groupId: string, time: number): BooleanEditResult {
   const group = getLayer(layers, groupId);
-  if (!group || group.type !== 'boolean') return { error: 'Selecciona un grupo booleano para aplanarlo' };
+  if (!group || group.type !== 'boolean') return { error: t('Selecciona un grupo booleano para aplanarlo') };
   const { d } = resolveBooleanGroup(layers, group, time);
-  if (d === null) return { error: 'No se pudo calcular la forma combinada. Inténtalo de nuevo en otro instante.' };
-  if (!d) return { error: 'La combinación está vacía en este instante: no hay forma que aplanar' };
+  if (d === null) return { error: t('No se pudo calcular la forma combinada. Inténtalo de nuevo en otro instante.') };
+  if (!d) return { error: t('La combinación está vacía en este instante: no hay forma que aplanar') };
 
   const remove = new Set(getDescendantIds(layers, groupId));
   const { booleanOp: _op, ...rest } = group;
@@ -171,26 +238,31 @@ export function flattenBooleanGroup(layers: Layer[], groupId: string, time: numb
 }
 
 /**
- * Takes the shapes out of a boolean group and removes it. Each shape keeps its place on the
- * canvas (the group's transform at this time is applied to it) and gets its own style back.
+ * Takes the layers out of a group (plain or boolean) and removes it. Each layer keeps its place on
+ * the canvas (the group's transform at this time is applied to it); the shapes of a boolean group
+ * get their own style back, and the opacity of a plain group is passed on to its layers.
  * Returns whether the group's own transform was animated (that animation can't be kept).
  */
-export function ungroupBooleanGroup(
+export function ungroupGroup(
   layers: Layer[],
   groupId: string,
   time: number
 ): { layers: Layer[]; selectIds: string[]; lostAnimation: boolean } | { error: string } {
   const group = getLayer(layers, groupId);
-  if (!group || group.type !== 'boolean') return { error: 'Selecciona un grupo booleano para desagruparlo' };
-  const m = layerMatrix(getLayerPropertiesAtTime(group, time));
+  if (!group || (group.type !== 'boolean' && group.type !== 'group')) return { error: t('Selecciona un grupo para desagruparlo') };
+  const groupProps = getLayerPropertiesAtTime(group, time);
+  const m = layerMatrix(groupProps);
+  // A plain group fades its layers: they keep looking the same with the opacity folded in
+  const fade = group.type === 'group' ? Math.max(0, Math.min(1, groupProps.opacity ?? 1)) : 1;
   const children = new Map(
     getChildren(layers, groupId).map((child) => {
-      const moved = transformLayerPose(child, m);
+      let moved = transformLayerPose(child, m);
+      if (fade < 1) moved = fadeLayer(moved, fade);
       const { parentId: _p, ...rest } = moved;
       return [child.id, (group.parentId ? { ...rest, parentId: group.parentId } : rest) as Layer];
     })
   );
-  const transformProps = ['x', 'y', 'anchorX', 'anchorY', 'scaleX', 'scaleY', 'rotation'];
+  const transformProps = ['x', 'y', 'anchorX', 'anchorY', 'scaleX', 'scaleY', 'rotation', ...(group.type === 'group' ? ['opacity'] : [])];
   return {
     layers: normalizeLayerTree(layers.filter((l) => l.id !== groupId).map((l) => children.get(l.id) ?? l)),
     selectIds: [...children.keys()],
@@ -198,12 +270,26 @@ export function ungroupBooleanGroup(
   };
 }
 
-/** Removes layers with everything inside them; boolean groups left empty go away too */
+// Multiplies a layer's opacity (and its opacity animation) by k
+function fadeLayer(layer: Layer, k: number): Layer {
+  const round = (v: number) => Number(v.toFixed(4));
+  return {
+    ...layer,
+    properties: { ...layer.properties, opacity: round((layer.properties.opacity ?? 1) * k) },
+    tracks: layer.tracks.map((track) =>
+      track.property !== 'opacity'
+        ? track
+        : { ...track, keyframes: track.keyframes.map((kf) => (typeof kf.value === 'number' ? { ...kf, value: round(kf.value * k) } : kf)) }
+    ),
+  };
+}
+
+/** Removes layers with everything inside them; groups left empty go away too */
 export function deleteLayerTrees(layers: Layer[], ids: string[]): { layers: Layer[]; removed: Set<string> } {
   const removed = new Set(withDescendants(layers, ids));
   let next = layers.filter((l) => !removed.has(l.id));
   for (;;) {
-    const empty = next.filter((l) => l.type === 'boolean' && !next.some((c) => c.parentId === l.id));
+    const empty = next.filter((l) => isContainerLayer(l) && !next.some((c) => c.parentId === l.id));
     if (empty.length === 0) break;
     empty.forEach((l) => removed.add(l.id));
     next = next.filter((l) => !removed.has(l.id));
@@ -243,9 +329,9 @@ export type LayerDropPosition = 'before' | 'after' | 'inside';
 
 /**
  * Moves a layer (with everything inside it) in the stacking order, as dropped on another row of
- * the timeline: before or after it (as its sibling) or inside it (a boolean group, in front of its
- * shapes). Changing groups keeps the layer where it is on the canvas. A group left without shapes
- * goes away.
+ * the timeline: before or after it (as its sibling) or inside it (a group, in front of its
+ * layers). Changing groups keeps the layer where it is on the canvas. A group left empty goes
+ * away.
  */
 export function moveLayer(
   layers: Layer[],
@@ -259,10 +345,12 @@ export function moveLayer(
   if (!layer || !ref || layerId === refId) return null;
   const subtree = [layerId, ...getDescendantIds(layers, layerId)];
   if (subtree.includes(refId)) return null;
-  if (position === 'inside' && ref.type !== 'boolean') return null;
+  if (position === 'inside' && !isContainerLayer(ref)) return null;
 
   const parentId = position === 'inside' ? ref.id : ref.parentId;
-  if (parentId && !canBeBooleanOperand(layer)) return { error: 'Los textos no pueden formar parte de un grupo booleano' };
+  if (getLayer(layers, parentId)?.type === 'boolean' && !canBeBooleanOperand(layer)) {
+    return { error: t('Los textos y los grupos no pueden formar parte de un grupo booleano') };
+  }
 
   // Same place on the canvas in the new space: new space ← canvas ← old space
   let moved = layer;

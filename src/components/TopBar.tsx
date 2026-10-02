@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Cursor as MousePointer,
   Hand,
@@ -13,16 +13,13 @@ import {
   Checkerboard as Grid,
   ArrowUUpLeft as Undo2,
   ArrowUUpRight as Redo2,
-  Path as PathIcon,
-  SelectionSlash,
-  UniteSquare,
 } from '@phosphor-icons/react';
-import { BooleanOperation, Project } from '../types/animation';
-import { BOOLEAN_LABELS, BOOLEAN_OPERATIONS } from '../utils/booleanGroups';
-import { BOOLEAN_ICONS } from './booleanIcons';
+import { Project } from '../types/animation';
 import ThemeToggle from './ThemeToggle';
+import LanguageSelector from './LanguageSelector';
 import { Dropdown } from './Dropdown';
 import { isNoColor } from './ColorSwatch';
+import { t } from '../i18n';
 
 const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2, 4.38];
 
@@ -58,11 +55,6 @@ interface TopBarProps {
   onOpenFolder: (id: string) => void;
   onRenameProject: (title: string) => void;
   onAddLayer: (type: ShapeType) => void;
-  // Boolean operations on the selection: combine shapes or change the selected group's operation
-  booleanState: { canCombine: boolean; activeOp: BooleanOperation | null; canFlatten: boolean };
-  onBooleanOperation: (op: BooleanOperation) => void;
-  onFlattenBoolean: () => void;
-  onUngroupBoolean: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -84,30 +76,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenFolder,
   onRenameProject,
   onAddLayer,
-  booleanState,
-  onBooleanOperation,
-  onFlattenBoolean,
-  onUngroupBoolean,
 }) => {
   const [titleDraft, setTitleDraft] = useState(project.title);
-  const [showBooleanMenu, setShowBooleanMenu] = useState(false);
-  const booleanMenuRef = useRef<HTMLDivElement>(null);
-  const booleanEnabled = booleanState.canCombine || booleanState.canFlatten;
-  const ActiveBooleanIcon = booleanState.activeOp ? BOOLEAN_ICONS[booleanState.activeOp] : UniteSquare;
-
-  // The boolean menu closes on a click outside it or when nothing can be combined anymore
-  useEffect(() => {
-    if (!showBooleanMenu) return;
-    const handlePointerDown = (e: MouseEvent) => {
-      if (!booleanMenuRef.current?.contains(e.target as Node)) setShowBooleanMenu(false);
-    };
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [showBooleanMenu]);
-  useEffect(() => {
-    if (!booleanEnabled) setShowBooleanMenu(false);
-  }, [booleanEnabled]);
-
   // Keep the editable title in sync when another project is opened
   useEffect(() => setTitleDraft(project.title), [project.title]);
 
@@ -138,7 +108,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={onUndo}
             disabled={!canUndo}
-            data-tooltip="Deshacer"
+            data-tooltip={t('Deshacer')}
             data-shortcut="Ctrl+Z"
             className={`p-1.5 rounded-md transition-colors ${
               canUndo
@@ -151,7 +121,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={onRedo}
             disabled={!canRedo}
-            data-tooltip="Rehacer"
+            data-tooltip={t('Rehacer')}
             data-shortcut="Ctrl+Y / Ctrl+Shift+Z"
             className={`p-1.5 rounded-md transition-colors ${
               canRedo
@@ -167,7 +137,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <div className="flex items-center bg-secondary rounded-lg p-0.5 border border-border">
           <button
             onClick={() => setActiveTool('select')}
-            data-tooltip="Seleccionar"
+            data-tooltip={t('Seleccionar')}
             data-shortcut="V"
             className={`p-1.5 rounded-md transition-colors ${
               activeTool === 'select'
@@ -179,7 +149,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           </button>
           <button
             onClick={() => setActiveTool('hand')}
-            data-tooltip="Mano: desplazar el lienzo (o mantén Espacio)"
+            data-tooltip={t('Mano: desplazar el lienzo (o mantén Espacio)')}
             data-shortcut="H"
             className={`p-1.5 rounded-md transition-colors ${
               activeTool === 'hand'
@@ -193,7 +163,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <div className="relative">
             <button
               onClick={() => setShowShapesDropdown(!showShapesDropdown)}
-              data-tooltip="Añadir forma"
+              data-tooltip={t('Añadir forma')}
               className={`p-1.5 rounded-md transition-colors flex items-center gap-0.5 ${
                 showShapesDropdown
                   ? 'bg-bento-blue text-white'
@@ -216,7 +186,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-accent text-left"
                   >
                     <Icon className="w-3.5 h-3.5 text-bento-blue" />
-                    <span>{label}</span>
+                    <span>{t(label)}</span>
                   </button>
                 ))}
               </div>
@@ -224,87 +194,6 @@ export const TopBar: React.FC<TopBarProps> = ({
           </div>
         </div>
 
-        {/* Boolean operations: combine the selected shapes, or change the selected group */}
-        <div ref={booleanMenuRef} className="relative">
-          <button
-            onClick={() => booleanEnabled && setShowBooleanMenu(!showBooleanMenu)}
-            disabled={!booleanEnabled}
-            data-tooltip={
-              booleanEnabled
-                ? 'Operaciones booleanas'
-                : 'Operaciones booleanas: selecciona dos o más formas (Shift + clic) o un grupo booleano'
-            }
-            className={`p-1.5 rounded-lg border flex items-center gap-0.5 transition-colors ${
-              showBooleanMenu
-                ? 'bg-bento-blue text-white border-bento-blue'
-                : booleanEnabled
-                  ? 'bg-secondary border-border text-muted-foreground hover:text-foreground hover:bg-accent'
-                  : 'bg-secondary border-border text-muted-foreground/50 opacity-50 cursor-not-allowed'
-            }`}
-          >
-            <ActiveBooleanIcon className="w-3.5 h-3.5" />
-            <ChevronDown className="w-2.5 h-2.5 opacity-60" />
-          </button>
-
-          {showBooleanMenu && (
-            <div className="absolute left-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 w-64 z-50 text-foreground">
-              {BOOLEAN_OPERATIONS.map((op) => {
-                const Icon = BOOLEAN_ICONS[op];
-                const active = booleanState.activeOp === op;
-                return (
-                  <button
-                    key={op}
-                    disabled={!booleanState.canCombine}
-                    onClick={() => {
-                      onBooleanOperation(op);
-                      setShowBooleanMenu(false);
-                    }}
-                    className={`w-full px-3 py-1.5 flex items-center gap-2 text-left hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent ${
-                      active ? 'text-bento-blue' : ''
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 shrink-0 text-bento-blue" weight={active ? 'fill' : 'regular'} />
-                    <span className="flex-1 min-w-0">
-                      <span className="block font-medium">{BOOLEAN_LABELS[op].action}</span>
-                      <span className="block text-[10px] text-muted-foreground truncate">{BOOLEAN_LABELS[op].description}</span>
-                    </span>
-                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">{BOOLEAN_LABELS[op].shortcut}</span>
-                  </button>
-                );
-              })}
-              <div className="my-1 border-t border-border" />
-              <button
-                disabled={!booleanState.canFlatten}
-                onClick={() => {
-                  onFlattenBoolean();
-                  setShowBooleanMenu(false);
-                }}
-                className="w-full px-3 py-1.5 flex items-center gap-2 text-left hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <PathIcon className="w-4 h-4 shrink-0 text-bento-blue" />
-                <span className="flex-1 min-w-0">
-                  <span className="block font-medium">Aplanar</span>
-                  <span className="block text-[10px] text-muted-foreground truncate">Convierte el grupo en un trazado editable</span>
-                </span>
-                <span className="text-[10px] font-mono text-muted-foreground shrink-0">Ctrl+E</span>
-              </button>
-              <button
-                disabled={!booleanState.canFlatten}
-                onClick={() => {
-                  onUngroupBoolean();
-                  setShowBooleanMenu(false);
-                }}
-                className="w-full px-3 py-1.5 flex items-center gap-2 text-left hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <SelectionSlash className="w-4 h-4 shrink-0 text-bento-blue" />
-                <span className="flex-1 min-w-0">
-                  <span className="block font-medium">Desagrupar</span>
-                  <span className="block text-[10px] text-muted-foreground truncate">Saca las formas del grupo y lo elimina</span>
-                </span>
-              </button>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Zone 2: Breadcrumb back to Inicio and the project name, renamed in place
@@ -313,9 +202,9 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={onGoHome}
           className="px-1.5 py-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent font-semibold transition-colors cursor-pointer whitespace-nowrap"
-          data-tooltip="Volver a los proyectos guardados"
+          data-tooltip={t('Volver a los proyectos guardados')}
         >
-          Inicio
+          {t('Inicio')}
         </button>
         <span className="text-muted-foreground/60 px-0.5 select-none" aria-hidden="true">/</span>
         {folder && (
@@ -323,7 +212,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               onClick={() => onOpenFolder(folder.id)}
               className="px-1.5 py-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent font-semibold transition-colors cursor-pointer whitespace-nowrap max-w-48 truncate"
-              data-tooltip="Ir a la carpeta del proyecto"
+              data-tooltip={t('Ir a la carpeta del proyecto')}
             >
               {folder.name}
             </button>
@@ -347,8 +236,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           size={Math.max(8, titleDraft.length + 1)}
           maxLength={80}
           spellCheck={false}
-          data-tooltip="Clic para renombrar el proyecto"
-          aria-label="Nombre del proyecto"
+          data-tooltip={t('Clic para renombrar el proyecto')}
+          aria-label={t('Nombre del proyecto')}
           className="max-w-[16rem] bg-transparent border-0 text-foreground font-semibold text-sm tracking-tight font-heading hover:bg-accent focus:bg-card px-2 py-1 rounded-xl focus:outline-none transition-colors focus:ring-1 focus:ring-ring truncate"
         />
       </div>
@@ -364,10 +253,10 @@ export const TopBar: React.FC<TopBarProps> = ({
                 ? 'bg-bento-blue/15 border-bento-blue/40 text-bento-blue'
                 : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
             }`}
-            data-tooltip="Alternar fondo transparente con patrón ajedrez"
+            data-tooltip={t('Alternar fondo transparente con patrón ajedrez')}
           >
             <Grid className="w-3 h-3" />
-            <span className="hidden sm:inline">Transparencia</span>
+            <span className="hidden sm:inline">{t('Transparencia')}</span>
           </button>
         )}
 
@@ -379,18 +268,19 @@ export const TopBar: React.FC<TopBarProps> = ({
           isSelected={(z, current) => Math.abs(current - z) < 0.05}
           triggerLabel={<span>{Math.round(zoom * 100)}%</span>}
           className="font-mono"
-          title="Zoom"
+          title={t('Zoom')}
         />
 
+        <LanguageSelector />
         <ThemeToggle />
 
         {/* Download the project as a Nori JSON file */}
         <button
           onClick={onDownloadJson}
           className="w-8 h-8 rounded-lg bg-card border border-border shadow-card flex items-center justify-center text-foreground hover:bg-accent transition-all duration-300 ease-out cursor-pointer"
-          data-tooltip="Descargar proyecto (JSON)"
+          data-tooltip={t('Descargar proyecto (JSON)')}
           data-shortcut="Ctrl+S"
-          aria-label="Descargar proyecto"
+          aria-label={t('Descargar proyecto')}
         >
           <Download className="w-4 h-4" />
         </button>
@@ -401,7 +291,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           className="flex items-center gap-1.5 px-3.5 py-1.5 bg-bento-blue hover:bg-bento-blue/90 active:bg-bento-blue/80 text-white font-bold rounded-lg shadow-card h-8 transition-all duration-300 ease-out whitespace-nowrap cursor-pointer"
         >
           <Video className="w-3.5 h-3.5" />
-          <span>Exportar</span>
+          <span>{t('Exportar')}</span>
         </button>
       </div>
     </header>

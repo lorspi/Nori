@@ -25,13 +25,14 @@ En un mundo donde las herramientas de motion design suelen ser pesadas, costosas
 
 - **Lienzo vectorial** con zoom, desplazamiento, punto de anclaje y vista previa de transparencia.
 - **Capas de formas y texto**: rectángulos, cápsulas, círculos, estrellas y textos editables.
+- **Grupos de capas** que se animan como un todo mientras cada capa conserva su propia animación.
 - **Operaciones booleanas** (unir, restar, intersectar y excluir) entre formas que siguen siendo editables y animables, como en Figma.
 - **Línea de tiempo con fotogramas clave** por propiedad, arrastrables y con reproducción en bucle.
 - **Curvas de suavizado** spring, Bézier, ease-in-out, bounce y lineal, con vista previa en vivo.
 - **Importación de animaciones Lottie** y de proyectos propios, desde un botón o arrastrando el archivo.
-- **Exportación a GIF, MP4, WebM, SVG animado y JSON**, con resolución, FPS y fondo transparente configurables.
+- **Exportación a GIF, MP4, WebM, SVG animado, Lottie (normal u optimizado) y JSON**, con resolución, FPS, antialiasing y fondo transparente configurables.
 - **Deshacer y rehacer** con los atajos de siempre.
-- **Tema claro y oscuro**, e instalación como aplicación (PWA).
+- **Interfaz en español e inglés**, tema claro y oscuro, e instalación como aplicación (PWA).
 
 ## Lo que Nori no pretende ser
 

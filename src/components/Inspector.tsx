@@ -25,10 +25,12 @@ import {
   Path as PathIcon,
   SelectionSlash,
   ArrowElbowLeftUp,
+  FolderSimple,
 } from '@phosphor-icons/react';
 import { BOOLEAN_LABELS, BOOLEAN_OPERATIONS } from '../utils/booleanGroups';
 import { getLayer } from '../utils/layerTree';
 import { BOOLEAN_ICONS } from './booleanIcons';
+import { t } from '../i18n';
 import { ColorSwatch, HexColorInput, isNoColor } from './ColorSwatch';
 import { DEFAULT_SHAPE } from '../utils/pathGeometry';
 import {
@@ -82,11 +84,13 @@ interface InspectorProps {
   // Align / distribute the selected layers (a single layer aligns to the canvas)
   onAlignLayers: (mode: AlignMode) => void;
   // Boolean groups: change the operation, flatten into a path, take the shapes out
-  // What the boolean buttons can do with the selection (the same as in the top bar)
+  // What the boolean buttons can do with the selection (the same as in the context menu)
   booleanState: { canCombine: boolean; activeOp: BooleanOperation | null; canFlatten: boolean };
   onBooleanOperation: (op: BooleanOperation) => void;
   onFlattenBoolean: (layerId: string) => void;
   onUngroupBoolean: (layerId: string) => void;
+  // Puts the selected layers in a plain group
+  onGroupLayers: () => void;
   onSelectLayer: (layerId: string) => void;
   currentTime: number;
 }
@@ -148,8 +152,8 @@ const LayerNameInput: React.FC<{ name: string; onRename: (name: string) => void 
       }}
       maxLength={80}
       spellCheck={false}
-      data-tooltip="Clic para renombrar la capa"
-      aria-label="Nombre de la capa"
+      data-tooltip={t('Clic para renombrar la capa')}
+      aria-label={t('Nombre de la capa')}
       className="w-full min-w-0 bg-transparent border-0 font-semibold text-foreground hover:bg-accent focus:bg-secondary px-1.5 py-0.5 -ml-1.5 rounded-md focus:outline-none transition-colors focus:ring-1 focus:ring-ring truncate"
     />
   );
@@ -178,6 +182,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   onBooleanOperation,
   onFlattenBoolean,
   onUngroupBoolean,
+  onGroupLayers,
   onSelectLayer,
   currentTime,
 }) => {
@@ -198,8 +203,8 @@ export const Inspector: React.FC<InspectorProps> = ({
   const selectionLabel = !primary
     ? ''
     : selection.length > 1
-      ? `${selection.length} fotogramas clave`
-      : `${isAnimatableProperty(primary.track.property) ? PROPERTY_META[primary.track.property].label : primary.track.label} · ${primary.keyframe.time.toFixed(2)}s`;
+      ? t('{count} fotogramas clave', { count: selection.length })
+      : `${t(isAnimatableProperty(primary.track.property) ? PROPERTY_META[primary.track.property].label : primary.track.label)} · ${primary.keyframe.time.toFixed(2)}s`;
 
   const currentEasing: EasingConfig = primary?.keyframe.easing ?? createDefaultEasing();
 
@@ -226,12 +231,12 @@ export const Inspector: React.FC<InspectorProps> = ({
       <aside className="w-72 shrink-0 bg-card border-l border-border p-3 text-xs overflow-y-auto select-none">
         <div className="flex items-center gap-2 pb-3 mb-3 border-b border-border">
           <Sliders className="w-4 h-4 text-bento-blue" />
-          <span className="font-semibold text-foreground">Ajustes del Proyecto</span>
+          <span className="font-semibold text-foreground">{t('Ajustes del Proyecto')}</span>
         </div>
 
         <div className="space-y-3">
           <div>
-            <label className="text-muted-foreground block mb-1">Nombre</label>
+            <label className="text-muted-foreground block mb-1">{t('Nombre')}</label>
             <input
               type="text"
               value={project.title}
@@ -249,7 +254,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 onChange={(v) => onUpdateProjectSettings({ width: v }, false)}
                 className="text-muted-foreground block w-fit mb-1"
               >
-                Ancho (px)
+                {t('Ancho (px)')}
               </ScrubLabel>
               <NumberInput
                 value={project.width}
@@ -267,7 +272,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 onChange={(v) => onUpdateProjectSettings({ height: v }, false)}
                 className="text-muted-foreground block w-fit mb-1"
               >
-                Alto (px)
+                {t('Alto (px)')}
               </ScrubLabel>
               <NumberInput
                 value={project.height}
@@ -290,7 +295,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 onChange={(v) => onUpdateProjectSettings({ duration: v }, false)}
                 className="text-muted-foreground block w-fit mb-1"
               >
-                Duración (s)
+                {t('Duración (s)')}
               </ScrubLabel>
               <div className="flex items-center gap-1.5">
                 <NumberInput
@@ -307,8 +312,8 @@ export const Inspector: React.FC<InspectorProps> = ({
                   disabled={!canFitDuration}
                   onClick={() => onUpdateProjectSettings({ duration: fitDuration })}
                   className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
-                  data-tooltip="Ajustar la duración a las animaciones"
-                  aria-label="Ajustar la duración a las animaciones"
+                  data-tooltip={t('Ajustar la duración a las animaciones')}
+                  aria-label={t('Ajustar la duración a las animaciones')}
                 >
                   <ArrowsInLineHorizontal className="w-3.5 h-3.5" />
                 </button>
@@ -330,20 +335,20 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
 
           <div>
-            <label className="text-muted-foreground block mb-1">Fondo del Lienzo</label>
+            <label className="text-muted-foreground block mb-1">{t('Fondo del Lienzo')}</label>
             <div className="flex items-center gap-2">
               <ColorSwatch
                 value={project.backgroundColor}
                 onChange={(color, recordUndo) => onUpdateProjectSettings({ backgroundColor: color }, recordUndo)}
-                title="Color de fondo"
+                title={t('Color de fondo')}
               />
               <HexColorInput
                 value={project.backgroundColor}
                 onChange={(color, recordUndo) => onUpdateProjectSettings({ backgroundColor: color }, recordUndo)}
                 emptyValue="transparent"
-                placeholder="Sin fondo"
+                placeholder={t('Sin fondo')}
                 className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground placeholder:text-muted-foreground"
-                ariaLabel="Color de fondo"
+                ariaLabel={t('Color de fondo')}
               />
               {/* Without a background the canvas is transparent (checkerboard) */}
               <button
@@ -357,7 +362,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   }
                 }}
                 className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
-                data-tooltip={isNoColor(project.backgroundColor) ? 'Añadir fondo' : 'Quitar fondo (lienzo transparente)'}
+                data-tooltip={isNoColor(project.backgroundColor) ? t('Añadir fondo') : t('Quitar fondo (lienzo transparente)')}
               >
                 {isNoColor(project.backgroundColor) ? <Plus className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
               </button>
@@ -365,7 +370,7 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
 
           <div className="pt-4 border-t border-border text-muted-foreground text-[11px] leading-relaxed">
-            <p>💡 Selecciona cualquier capa en el lienzo o en la línea de tiempo para inspeccionar y editar sus propiedades y curvas de suavizado.</p>
+            <p>💡 {t('Selecciona cualquier capa en el lienzo o en la línea de tiempo para inspeccionar y editar sus propiedades y curvas de suavizado.')}</p>
           </div>
         </div>
       </aside>
@@ -377,10 +382,15 @@ export const Inspector: React.FC<InspectorProps> = ({
   const keyframeRange = getLayerKeyframeRange(selectedLayer);
   const layerId = selectedLayer.id;
   const isBooleanGroup = selectedLayer.type === 'boolean';
+  // Plain group: only its transform, opacity and blur (its layers keep their own style)
+  const isPlainGroup = selectedLayer.type === 'group';
   // Several layers selected: the boolean buttons combine them into a new group
   const combinesSelection = selectedLayerIds.length > 1 && selectedLayerIds.includes(layerId);
   // A shape inside a boolean group: it is drawn with the group's fill, stroke, opacity and effects
-  const booleanParent = getLayer(project.layers, selectedLayer.parentId);
+  const parentGroup = getLayer(project.layers, selectedLayer.parentId);
+  const booleanParent = parentGroup?.type === 'boolean' ? parentGroup : undefined;
+  // A layer inside a plain group keeps its own style; its position is relative to the group
+  const plainParent = parentGroup?.type === 'group' ? parentGroup : undefined;
 
   // Scale fields are shown in %; with the aspect lock on, both axes change together
   const setScale = (axis: 'scaleX' | 'scaleY', percent: number, recordUndo = true) => {
@@ -411,7 +421,7 @@ export const Inspector: React.FC<InspectorProps> = ({
         className={`p-0.5 rounded transition-colors ${
           isAnimated ? 'text-bento-blue hover:text-bento-blue/80' : 'text-muted-foreground/50 hover:text-foreground'
         }`}
-        data-tooltip={isAnimated ? `Desactivar animación de ${label}` : `Activar animación de ${label}`}
+        data-tooltip={isAnimated ? t('Desactivar animación de {name}', { name: t(label) }) : t('Activar animación de {name}', { name: t(label) })}
       >
         <Diamond className="w-3 h-3" weight={isAnimated && hasKeyAtCurrent ? 'fill' : isAnimated ? 'bold' : 'regular'} />
       </button>
@@ -457,7 +467,21 @@ export const Inspector: React.FC<InspectorProps> = ({
     const shadow = p[key];
     const on = !!shadow?.enabled;
     const current = shadow ?? DEFAULT_SHADOWS[key];
-    const name = label.toLowerCase();
+    // Full sentences for each shadow, so every language can word them naturally
+    const texts =
+      key === 'dropShadow'
+        ? {
+            remove: t('Quitar sombra paralela'),
+            add: t('Añadir sombra paralela'),
+            color: t('Color de la sombra paralela'),
+            opacity: t('Opacidad de la sombra paralela'),
+          }
+        : {
+            remove: t('Quitar sombra interna'),
+            add: t('Añadir sombra interna'),
+            color: t('Color de la sombra interna'),
+            opacity: t('Opacidad de la sombra interna'),
+          };
     const update = (changes: Partial<ShadowEffect>, recordUndo = true) =>
       onUpdateLayerProperties(fillTargets, { [key]: { ...current, enabled: true, ...changes } }, recordUndo);
     const field = (prop: 'x' | 'y' | 'blur' | 'spread', fieldLabel: string, title: string, min?: number) => (
@@ -486,12 +510,12 @@ export const Inspector: React.FC<InspectorProps> = ({
     return (
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-muted-foreground font-medium">{label}</span>
+          <span className="text-[10px] text-muted-foreground font-medium">{t(label)}</span>
           <button
             type="button"
             onClick={() => onUpdateLayerProperties(fillTargets, { [key]: { ...current, enabled: !on } })}
             className="p-0.5 rounded text-muted-foreground hover:text-foreground"
-            data-tooltip={on ? `Quitar ${name}` : `Añadir ${name}`}
+            data-tooltip={on ? texts.remove : texts.add}
           >
             {on ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
           </button>
@@ -502,30 +526,30 @@ export const Inspector: React.FC<InspectorProps> = ({
               <ColorSwatch
                 value={current.color}
                 onChange={(color, recordUndo) => update({ color }, recordUndo)}
-                title={`Color de la ${name}`}
+                title={texts.color}
               />
               <HexColorInput
                 value={current.color}
                 onChange={(color, recordUndo) => update({ color }, recordUndo)}
                 className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
-                ariaLabel={`Color de la ${name}`}
+                ariaLabel={texts.color}
               />
               {renderOpacityField(
                 Math.round(current.opacity * 100),
                 (percent, recordUndo) => update({ opacity: Math.max(0, Math.min(100, percent)) / 100 }, recordUndo),
-                `Opacidad de la ${name}`
+                texts.opacity
               )}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              {field('x', 'X', 'Desplazamiento horizontal')}
-              {field('y', 'Y', 'Desplazamiento vertical')}
-              {field('blur', 'Desenfoque', 'Desenfoque de la sombra', 0)}
+              {field('x', 'X', t('Desplazamiento horizontal'))}
+              {field('y', 'Y', t('Desplazamiento vertical'))}
+              {field('blur', t('Desenfoque'), t('Desenfoque de la sombra'), 0)}
               {field(
                 'spread',
-                'Extensión',
+                t('Extensión'),
                 key === 'dropShadow'
-                  ? 'Agranda la sombra (o la encoge, con valores negativos)'
-                  : 'Lleva la sombra más hacia dentro (o la acerca al borde, con valores negativos)'
+                  ? t('Agranda la sombra (o la encoge, con valores negativos)')
+                  : t('Lleva la sombra más hacia dentro (o la acerca al borde, con valores negativos)')
               )}
             </div>
           </div>
@@ -539,7 +563,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   const renderPaintRow = (prop: 'fill' | 'stroke', defaultColor: string, emptyLabel: string) => {
     const value = p[prop];
     const opacityProp = prop === 'fill' ? 'fillOpacity' : 'strokeOpacity';
-    const opacityLabel = prop === 'fill' ? 'Opacidad del relleno' : 'Opacidad del trazo';
+    const opacityLabel = prop === 'fill' ? t('Opacidad del relleno') : t('Opacidad del trazo');
     const setOpacity = (percent: number, recordUndo = true) =>
       onUpdateLayerProperty(fillTargets, opacityProp, Math.max(0, Math.min(100, percent)) / 100, recordUndo);
     const none = isNoColor(value);
@@ -552,14 +576,14 @@ export const Inspector: React.FC<InspectorProps> = ({
     };
     return (
       <div className="flex items-center gap-1.5">
-        <ColorSwatch value={value} onChange={setColor} title={prop === 'fill' ? 'Color de relleno' : 'Color del trazo'} />
+        <ColorSwatch value={value} onChange={setColor} title={prop === 'fill' ? t('Color de relleno') : t('Color del trazo')} />
         <HexColorInput
           value={value}
           onChange={setColor}
           emptyValue="transparent"
           placeholder={emptyLabel}
           className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground placeholder:text-muted-foreground"
-          ariaLabel={prop === 'fill' ? 'Color de relleno' : 'Color del trazo'}
+          ariaLabel={prop === 'fill' ? t('Color de relleno') : t('Color del trazo')}
         />
         {renderOpacityField(Math.round((p[opacityProp] ?? 1) * 100), setOpacity, opacityLabel, none)}
         <button
@@ -573,7 +597,7 @@ export const Inspector: React.FC<InspectorProps> = ({
             }
           }}
           className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
-          data-tooltip={none ? (prop === 'fill' ? 'Añadir relleno' : 'Añadir trazo') : prop === 'fill' ? 'Quitar relleno' : 'Quitar trazo'}
+          data-tooltip={none ? (prop === 'fill' ? t('Añadir relleno') : t('Añadir trazo')) : prop === 'fill' ? t('Quitar relleno') : t('Quitar trazo')}
         >
           {none ? <Plus className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
         </button>
@@ -641,7 +665,7 @@ export const Inspector: React.FC<InspectorProps> = ({
     return (
       <div
         className={`flex items-center gap-1 bg-secondary border border-border rounded-md px-1.5 h-7 ${disabled ? 'opacity-60' : ''}`}
-        data-tooltip={keyframeRange ? title : 'La capa no tiene fotogramas clave'}
+        data-tooltip={keyframeRange ? title : t('La capa no tiene fotogramas clave')}
       >
         <Clock className="w-3 h-3 shrink-0 text-bento-blue" />
         {disabled ? (
@@ -692,14 +716,14 @@ export const Inspector: React.FC<InspectorProps> = ({
             <button
               onClick={() => onDuplicateLayer(selectedLayer.id)}
               className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent"
-              data-tooltip="Duplicar capa"
+              data-tooltip={t('Duplicar capa')}
             >
               <Copy className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => onDeleteLayer(selectedLayer.id)}
               className="p-1 text-muted-foreground hover:text-destructive rounded-md hover:bg-accent"
-              data-tooltip="Eliminar capa"
+              data-tooltip={t('Eliminar capa')}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -709,7 +733,7 @@ export const Inspector: React.FC<InspectorProps> = ({
         {/* Align & distribute: to the canvas with one layer, to the selection with several */}
         <div>
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-            {alignCount > 1 ? `Alinear ${alignCount} capas` : 'Alinear al lienzo'}
+            {alignCount > 1 ? t('Alinear {count} capas', { count: alignCount }) : t('Alinear al lienzo')}
           </span>
           <div className="flex items-center gap-1">
             {ALIGN_BUTTONS.map(({ mode, icon: Icon, label }) => (
@@ -718,8 +742,8 @@ export const Inspector: React.FC<InspectorProps> = ({
                 type="button"
                 onClick={() => onAlignLayers(mode)}
                 className="w-7 h-7 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
-                data-tooltip={`${label} ${alignCount > 1 ? 'de la selección' : 'del lienzo'}`}
-                aria-label={label}
+                data-tooltip={alignCount > 1 ? t('{action} de la selección', { action: t(label) }) : t('{action} del lienzo', { action: t(label) })}
+                aria-label={t(label)}
               >
                 <Icon className="w-3.5 h-3.5" />
               </button>
@@ -732,8 +756,8 @@ export const Inspector: React.FC<InspectorProps> = ({
                 disabled={alignCount < 3}
                 onClick={() => onAlignLayers(mode)}
                 className="w-7 h-7 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
-                data-tooltip={`${label}: mismo espacio entre las capas (selecciona 3 o más)`}
-                aria-label={label}
+                data-tooltip={t('{action}: mismo espacio entre las capas (selecciona 3 o más)', { action: t(label) })}
+                aria-label={t(label)}
               >
                 <Icon className="w-3.5 h-3.5" />
               </button>
@@ -745,7 +769,7 @@ export const Inspector: React.FC<InspectorProps> = ({
         {(booleanState.activeOp || (combinesSelection && booleanState.canCombine)) && (
           <div>
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-              {combinesSelection ? `Combinar ${selectedLayerIds.length} capas` : 'Operación booleana'}
+              {combinesSelection ? t('Combinar {count} capas', { count: selectedLayerIds.length }) : t('Operación booleana')}
             </span>
             <div className="flex items-center bg-secondary border border-border rounded-md p-0.5 gap-0.5">
               {BOOLEAN_OPERATIONS.map((op) => {
@@ -759,9 +783,9 @@ export const Inspector: React.FC<InspectorProps> = ({
                     className={`flex-1 h-7 flex items-center justify-center rounded transition-colors ${
                       active ? 'bg-card text-bento-blue shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                     }`}
-                    data-tooltip={`${BOOLEAN_LABELS[op].name}: ${BOOLEAN_LABELS[op].description.toLowerCase()}`}
+                    data-tooltip={`${t(BOOLEAN_LABELS[op].name)}: ${t(BOOLEAN_LABELS[op].description).toLowerCase()}`}
                     data-shortcut={BOOLEAN_LABELS[op].shortcut}
-                    aria-label={BOOLEAN_LABELS[op].name}
+                    aria-label={t(BOOLEAN_LABELS[op].name)}
                     aria-pressed={active}
                   >
                     <Icon className="w-4 h-4" weight={active ? 'fill' : 'regular'} />
@@ -771,8 +795,7 @@ export const Inspector: React.FC<InspectorProps> = ({
             </div>
             {combinesSelection && (
               <p className="text-[10px] text-muted-foreground leading-snug mt-1.5">
-                Combina las formas seleccionadas en un grupo booleano. Las formas siguen siendo editables y animables
-                dentro del grupo.
+                {t('Combina las formas seleccionadas en un grupo booleano. Las formas siguen siendo editables y animables dentro del grupo.')}
               </p>
             )}
             {/* Boolean group: flatten and ungroup */}
@@ -783,28 +806,85 @@ export const Inspector: React.FC<InspectorProps> = ({
                     type="button"
                     onClick={() => onFlattenBoolean(layerId)}
                     className="flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
-                    data-tooltip="Convierte el grupo en un solo trazado con su forma en el fotograma actual"
+                    data-tooltip={t('Convierte el grupo en un solo trazado con su forma en el fotograma actual')}
                     data-shortcut="Ctrl+E"
                   >
                     <PathIcon className="w-3 h-3" />
-                    <span>Aplanar</span>
+                    <span>{t('Aplanar')}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => onUngroupBoolean(layerId)}
                     className="flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
-                    data-tooltip="Saca las formas del grupo, donde se ven ahora, y elimina el grupo"
+                    data-tooltip={t('Saca las formas del grupo, donde se ven ahora, y elimina el grupo')}
                   >
                     <SelectionSlash className="w-3 h-3" />
-                    <span>Desagrupar</span>
+                    <span>{t('Desagrupar')}</span>
                   </button>
                 </div>
                 <p className="text-[10px] text-muted-foreground leading-snug mt-1.5">
-                  Las formas del grupo siguen siendo editables y animables: haz doble clic en el lienzo para seleccionar
-                  una, o elígela en la línea del tiempo. El relleno, el trazo y los efectos son los del grupo.
+                  {t('Las formas del grupo siguen siendo editables y animables: haz doble clic en el lienzo para seleccionar una, o elígela en la línea del tiempo. El relleno, el trazo y los efectos son los del grupo.')}
                 </p>
               </>
             )}
+          </div>
+        )}
+
+        {/* Plain group: take its layers out */}
+        {isPlainGroup && !combinesSelection && (
+          <div>
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+              {t('Grupo')}
+            </span>
+            <button
+              type="button"
+              onClick={() => onUngroupBoolean(layerId)}
+              className="w-full flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
+              data-tooltip={t('Saca las capas del grupo, donde se ven ahora, y elimina el grupo')}
+              data-shortcut="Ctrl+Shift+Alt+G"
+            >
+              <SelectionSlash className="w-3 h-3" />
+              <span>{t('Desagrupar')}</span>
+            </button>
+            <p className="text-[10px] text-muted-foreground leading-snug mt-1.5">
+              {t('El grupo mueve, gira, escala y desvanece todas sus capas a la vez. Cada capa conserva su estilo y su animación: haz doble clic en el lienzo para seleccionar una, o elígela en la línea del tiempo.')}
+            </p>
+          </div>
+        )}
+
+        {/* Several layers: put them in a plain group */}
+        {combinesSelection && (
+          <div>
+            <button
+              type="button"
+              onClick={() => onGroupLayers()}
+              className="w-full flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
+              data-tooltip={t('Pone las capas seleccionadas en un grupo para animarlas juntas')}
+              data-shortcut="Ctrl+Alt+G"
+            >
+              <FolderSimple className="w-3 h-3" />
+              <span>{t('Agrupar {count} capas', { count: selectedLayerIds.length })}</span>
+            </button>
+          </div>
+        )}
+
+        {/* A layer inside a plain group */}
+        {plainParent && (
+          <div className="bg-secondary border border-border rounded-md p-2 text-[11px] text-muted-foreground leading-snug space-y-1.5">
+            <p>
+              {t('Esta capa está dentro de')} <span className="text-foreground font-medium">{plainParent.name}</span>.{' '}
+              {t('Su posición, rotación y escala son relativas al grupo, que también puede animarse.')}
+            </p>
+            <button
+              type="button"
+              onClick={() => onSelectLayer(plainParent.id)}
+              className="flex items-center gap-1 text-bento-blue hover:underline"
+              data-tooltip={t('Seleccionar el grupo')}
+              data-shortcut="Esc"
+            >
+              <ArrowElbowLeftUp className="w-3 h-3" />
+              <span>{t('Seleccionar el grupo')}</span>
+            </button>
           </div>
         )}
 
@@ -812,18 +892,18 @@ export const Inspector: React.FC<InspectorProps> = ({
         {booleanParent && (
           <div className="bg-secondary border border-border rounded-md p-2 text-[11px] text-muted-foreground leading-snug space-y-1.5">
             <p>
-              Esta forma está dentro de <span className="text-foreground font-medium">{booleanParent.name}</span>. Su
-              posición es relativa al grupo y se dibuja con el relleno, el trazo y los efectos del grupo.
+              {t('Esta forma está dentro de')} <span className="text-foreground font-medium">{booleanParent.name}</span>.{' '}
+              {t('Su posición es relativa al grupo y se dibuja con el relleno, el trazo y los efectos del grupo.')}
             </p>
             <button
               type="button"
               onClick={() => onSelectLayer(booleanParent.id)}
               className="flex items-center gap-1 text-bento-blue hover:underline"
-              data-tooltip="Seleccionar el grupo"
+              data-tooltip={t('Seleccionar el grupo')}
               data-shortcut="Esc"
             >
               <ArrowElbowLeftUp className="w-3 h-3" />
-              <span>Seleccionar el grupo</span>
+              <span>{t('Seleccionar el grupo')}</span>
             </button>
           </div>
         )}
@@ -831,11 +911,11 @@ export const Inspector: React.FC<InspectorProps> = ({
         {/* Timing Section: start and length of the layer bar (editable, retimes its keyframes) */}
         <div>
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-            Animación
+            {t('Animación')}
           </span>
           <div className="grid grid-cols-2 gap-2">
-            {renderTimingField('start', 'Inicio', 'Momento en que empieza la animación de la capa')}
-            {renderTimingField('length', 'Duración', 'Duración de la animación de la capa')}
+            {renderTimingField('start', t('Inicio##tiempo'), t('Momento en que empieza la animación de la capa'))}
+            {renderTimingField('length', t('Duración'), t('Duración de la animación de la capa'))}
           </div>
         </div>
 
@@ -843,7 +923,7 @@ export const Inspector: React.FC<InspectorProps> = ({
         <div className="pt-2 border-t border-border">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Curva de Suavizado
+              {t('Curva de Suavizado')}
             </span>
             <span className="text-[10px] font-mono text-bento-blue">
               {selectionLabel}
@@ -854,13 +934,12 @@ export const Inspector: React.FC<InspectorProps> = ({
             <p className="text-[11px] text-muted-foreground leading-relaxed bg-secondary border border-border rounded-md p-2">
               {selectedLayer.tracks.length === 0 ? (
                 <>
-                  Activa la animación de un parámetro con el icono{' '}
-                  <Diamond className="inline w-2.5 h-2.5 -mt-0.5" /> para crear fotogramas clave y editar su curva.
+                  {t('Activa la animación de un parámetro con el icono')}{' '}
+                  <Diamond className="inline w-2.5 h-2.5 -mt-0.5" /> {t('para crear fotogramas clave y editar su curva.')}
                 </>
               ) : (
                 <>
-                  Selecciona uno o varios fotogramas clave en la línea del tiempo (Shift/Ctrl + clic o
-                  arrastrando un recuadro) para editar su curva de suavizado.
+                  {t('Selecciona uno o varios fotogramas clave en la línea del tiempo (Shift/Ctrl + clic o arrastrando un recuadro) para editar su curva de suavizado.')}
                 </>
               )}
             </p>
@@ -868,7 +947,7 @@ export const Inspector: React.FC<InspectorProps> = ({
           <>
           {hasMixedEasing && (
             <p className="text-[10px] text-bento-orange mb-1.5">
-              Los fotogramas seleccionados tienen curvas distintas; al editar se aplicará esta a todos.
+              {t('Los fotogramas seleccionados tienen curvas distintas; al editar se aplicará esta a todos.')}
             </p>
           )}
           <CurveEditor
@@ -884,13 +963,13 @@ export const Inspector: React.FC<InspectorProps> = ({
         {/* Transform Properties */}
         <div className="pt-2 border-t border-border space-y-2">
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
-            Transformación
+            {t('Transformación')}
           </span>
 
           {/* Position X / Y */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground font-medium">Posición</span>
+              <span className="text-[10px] text-muted-foreground font-medium">{t('Posición')}</span>
               {renderAnimToggle(['x', 'y'], 'posición')}
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -907,7 +986,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   value={Math.round(p.x)}
                   onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'x', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                  data-tooltip="Posición X"
+                  data-tooltip={t('Posición X')}
                 />
               </div>
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
@@ -923,7 +1002,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   value={Math.round(p.y)}
                   onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'y', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                  data-tooltip="Posición Y"
+                  data-tooltip={t('Posición Y')}
                 />
               </div>
             </div>
@@ -934,16 +1013,16 @@ export const Inspector: React.FC<InspectorProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium">
                 <Crosshair className="w-3 h-3 text-bento-blue" />
-                <span>Punto de Anclaje</span>
+                <span>{t('Punto de Anclaje')}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => onUpdateLayerProperties(layerId, { anchorX: 0, anchorY: 0 })}
                   className="text-[9px] text-bento-blue hover:text-bento-blue/80 font-mono hover:underline"
-                  data-tooltip="Centrar punto de anclaje (0, 0)"
+                  data-tooltip={t('Centrar punto de anclaje (0, 0)')}
                 >
-                  Centrar (0, 0)
+                  {t('Centrar (0, 0)')}
                 </button>
                 {renderAnimToggle(['anchorX', 'anchorY'], 'punto de anclaje')}
               </div>
@@ -962,7 +1041,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   value={Math.round(p.anchorX || 0)}
                   onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'anchorX', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                  data-tooltip="Punto de anclaje X (horizontal)"
+                  data-tooltip={t('Punto de anclaje X (horizontal)')}
                 />
               </div>
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
@@ -978,7 +1057,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   value={Math.round(p.anchorY || 0)}
                   onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'anchorY', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                  data-tooltip="Punto de anclaje Y (vertical)"
+                  data-tooltip={t('Punto de anclaje Y (vertical)')}
                 />
               </div>
             </div>
@@ -987,7 +1066,7 @@ export const Inspector: React.FC<InspectorProps> = ({
           {/* Scale X / Y & Link */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground font-medium">Escala</span>
+              <span className="text-[10px] text-muted-foreground font-medium">{t('Escala')}</span>
               {renderAnimToggle(['scaleX', 'scaleY'], 'escala')}
             </div>
             <div className="flex items-center gap-1.5">
@@ -1015,7 +1094,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                     ? 'bg-bento-blue/10 border-bento-blue/40 text-bento-blue'
                     : 'bg-secondary border-border text-muted-foreground'
                 }`}
-                data-tooltip="Vincular proporción"
+                data-tooltip={t('Vincular proporción')}
               >
                 {aspectLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
               </button>
@@ -1043,7 +1122,7 @@ export const Inspector: React.FC<InspectorProps> = ({
           <div className={`grid gap-2 ${booleanParent ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground font-medium">Rotación</span>
+                <span className="text-[10px] text-muted-foreground font-medium">{t('Rotación')}</span>
                 {renderAnimToggle(['rotation'], 'rotación')}
               </div>
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
@@ -1066,7 +1145,7 @@ export const Inspector: React.FC<InspectorProps> = ({
             {!booleanParent && (
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground font-medium">Opacidad</span>
+                <span className="text-[10px] text-muted-foreground font-medium">{t('Opacidad')}</span>
                 {renderAnimToggle(['opacity'], 'opacidad')}
               </div>
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
@@ -1095,23 +1174,23 @@ export const Inspector: React.FC<InspectorProps> = ({
         </div>
 
         {/* Shape geometry & vertices (a boolean group's shape comes from the shapes inside it) */}
-        {selectedLayer.type !== 'text' && !isBooleanGroup && (
+        {selectedLayer.type !== 'text' && !isBooleanGroup && !isPlainGroup && (
           <div className="pt-2 border-t border-border space-y-2">
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
-              Forma
+              {t('Forma')}
             </span>
 
             {selectedLayer.type === 'polygon' &&
-              renderNumberField('sides', 'Lados', p.sides ?? DEFAULT_SHAPE.sides, { min: 3, max: 12, step: 0.1, round: true })}
+              renderNumberField('sides', t('Lados'), p.sides ?? DEFAULT_SHAPE.sides, { min: 3, max: 12, step: 0.1, round: true })}
             {selectedLayer.type === 'star' && (
               <div className="grid grid-cols-2 gap-2">
-                {renderNumberField('points', 'Puntas', p.points ?? DEFAULT_SHAPE.points, { min: 3, max: 12, step: 0.1, round: true })}
-                {renderNumberField('innerRadius', 'Interior', Math.round((p.innerRadius ?? DEFAULT_SHAPE.innerRadius) * 100), {
+                {renderNumberField('points', t('Puntas'), p.points ?? DEFAULT_SHAPE.points, { min: 3, max: 12, step: 0.1, round: true })}
+                {renderNumberField('innerRadius', t('Radio interior'), Math.round((p.innerRadius ?? DEFAULT_SHAPE.innerRadius) * 100), {
                   min: 5,
                   max: 100,
                   unit: '%',
                   toValue: (v) => v / 100,
-                  title: 'Radio interior respecto al exterior',
+                  title: t('Radio interior respecto al exterior'),
                 })}
               </div>
             )}
@@ -1119,17 +1198,17 @@ export const Inspector: React.FC<InspectorProps> = ({
             {['rect', 'polygon', 'star'].includes(selectedLayer.type) && (
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground font-medium">Esquinas redondeadas</span>
+                  <span className="text-[10px] text-muted-foreground font-medium">{t('Esquinas redondeadas')}</span>
                   {renderAnimToggle(['radius'], 'radio de esquinas')}
                 </div>
-                {renderNumberField('radius', 'Radio', Math.round(p.radius || 0), { min: 0, max: 1000, unit: 'px' })}
+                {renderNumberField('radius', t('Radio'), Math.round(p.radius || 0), { min: 0, max: 1000, unit: 'px' })}
               </div>
             )}
 
             {/* Vertex editing / shape animation */}
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground font-medium">Vértices</span>
+                <span className="text-[10px] text-muted-foreground font-medium">{t('Vértices')}</span>
                 {selectedLayer.type === 'path' && renderAnimToggle(['pathData'], 'forma')}
               </div>
               <button
@@ -1148,16 +1227,16 @@ export const Inspector: React.FC<InspectorProps> = ({
                 )}
                 <span>
                   {selectedLayer.type !== 'path'
-                    ? 'Convertir en trazado y editar vértices'
+                    ? t('Convertir en trazado y editar vértices')
                     : vertexEditLayerId === layerId
-                      ? 'Terminar edición'
-                      : 'Editar vértices'}
+                      ? t('Terminar edición')
+                      : t('Editar vértices')}
                 </span>
               </button>
               <p className="text-[10px] text-muted-foreground leading-snug">
                 {selectedLayer.type !== 'path'
-                  ? 'La forma pasa a ser un trazado con vértices editables.'
-                  : 'Arrastra los vértices en el lienzo (o haz doble clic en el trazado). Selecciona varios con un recuadro o Shift + clic, y muévelos con las flechas (Shift: 10 px). Doble clic en un vértice (o "Agregar curva") le añade tiradores Bézier; arrástralos para curvar los lados. Activa el rombo para animar la forma: cada fotograma clave guarda la posición de los vértices.'}
+                  ? t('La forma pasa a ser un trazado con vértices editables.')
+                  : t('Arrastra los vértices en el lienzo (o haz doble clic en el trazado). Selecciona varios con un recuadro o Shift + clic, y muévelos con las flechas (Shift: 10 px). Doble clic en un vértice (o "Agregar curva") le añade tiradores Bézier; arrástralos para curvar los lados. Activa el rombo para animar la forma: cada fotograma clave guarda la posición de los vértices.')}
               </p>
             </div>
           </div>
@@ -1166,11 +1245,11 @@ export const Inspector: React.FC<InspectorProps> = ({
         {/* Effects (a shape inside a boolean group uses the group's) */}
         {!booleanParent && (
         <div className="pt-2 border-t border-border space-y-2">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">Efectos</span>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">{t('Efectos')}</span>
           {/* Blur: added and removed like the shadows */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground font-medium">Desenfoque</span>
+              <span className="text-[10px] text-muted-foreground font-medium">{t('Desenfoque')}</span>
               <div className="flex items-center gap-1">
                 {hasBlur && renderAnimToggle(['blur'], 'desenfoque')}
                 <button
@@ -1185,23 +1264,23 @@ export const Inspector: React.FC<InspectorProps> = ({
                     }
                   }}
                   className="p-0.5 rounded text-muted-foreground hover:text-foreground"
-                  data-tooltip={hasBlur ? 'Quitar desenfoque' : 'Añadir desenfoque'}
+                  data-tooltip={hasBlur ? t('Quitar desenfoque') : t('Añadir desenfoque')}
                 >
                   {hasBlur ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
                 </button>
               </div>
             </div>
             {hasBlur &&
-              renderNumberField('blur', 'Radio', Number((p.blur || 0).toFixed(1)), {
+              renderNumberField('blur', t('Radio'), Number((p.blur || 0).toFixed(1)), {
                 min: 0,
                 max: 200,
                 step: 0.5,
                 unit: 'px',
-                title: 'Desenfoque gaussiano',
+                title: t('Desenfoque gaussiano'),
               })}
           </div>
-          {renderShadow('dropShadow', 'Sombra paralela')}
-          {selectedLayer.type !== 'text' && renderShadow('innerShadow', 'Sombra interna')}
+          {!isPlainGroup && renderShadow('dropShadow', 'Sombra paralela')}
+          {selectedLayer.type !== 'text' && !isPlainGroup && renderShadow('innerShadow', 'Sombra interna')}
         </div>
         )}
 
@@ -1209,7 +1288,7 @@ export const Inspector: React.FC<InspectorProps> = ({
         {selectedLayer.type === 'text' && (
           <div className="pt-2 border-t border-border space-y-2">
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
-              Contenido de Texto
+              {t('Contenido de Texto')}
             </span>
             <input
               type="text"
@@ -1226,7 +1305,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                   onChange={(v) => onUpdateLayerProperty(layerId, 'fontSize', v, false)}
                   className="text-muted-foreground block w-fit mb-0.5 text-[10px]"
                 >
-                  Tamaño
+                  {t('Tamaño')}
                 </ScrubLabel>
                 <NumberInput
                   value={p.fontSize || 32}
@@ -1235,7 +1314,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 />
               </div>
               <div>
-                <span className="text-muted-foreground block mb-0.5 text-[10px]">Grosor</span>
+                <span className="text-muted-foreground block mb-0.5 text-[10px]">{t('Grosor')}</span>
                 <Dropdown
                   value={String(p.fontWeight || '700')}
                   options={[
@@ -1249,36 +1328,36 @@ export const Inspector: React.FC<InspectorProps> = ({
                   size="sm"
                   className="w-full font-mono"
                   menuClassName="w-full"
-                  ariaLabel="Grosor"
+                  ariaLabel={t('Grosor')}
                 />
               </div>
             </div>
           </div>
         )}
 
-        {/* Fill & Stroke (a shape inside a boolean group uses the group's) */}
-        {!booleanParent && (
+        {/* Fill & Stroke (a shape inside a boolean group uses the group's; a plain group has none) */}
+        {!booleanParent && !isPlainGroup && (
         <div className="pt-2 border-t border-border space-y-2">
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
-            Relleno y Trazo
+            {t('Relleno y Trazo')}
           </span>
 
           {/* Fill */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground font-medium">Relleno</span>
+              <span className="text-[10px] text-muted-foreground font-medium">{t('Relleno')}</span>
               {renderAnimToggle(['fill', 'fillOpacity'], 'relleno')}
             </div>
-            {renderPaintRow('fill', '#0084ff', 'Sin relleno')}
+            {renderPaintRow('fill', '#0084ff', t('Sin relleno'))}
           </div>
 
           {/* Stroke */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground font-medium">Trazo</span>
+              <span className="text-[10px] text-muted-foreground font-medium">{t('Trazo')}</span>
               {renderAnimToggle(['stroke', 'strokeOpacity', 'strokeWidth'], 'trazo')}
             </div>
-            {renderPaintRow('stroke', '#1a1d23', 'Sin trazo')}
+            {renderPaintRow('stroke', '#1a1d23', t('Sin trazo'))}
             {/* Width and position only make sense with a stroke */}
             {!isNoColor(p.stroke) && (
             <div className="grid grid-cols-2 gap-2">
@@ -1292,7 +1371,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 onChange={(v) => onUpdateLayerProperty(fillTargets, 'strokeWidth', v, false)}
                 className="text-muted-foreground text-[10px] whitespace-nowrap"
               >
-                Grosor
+                {t('Grosor')}
               </ScrubLabel>
               <NumberInput
                 min={0}
@@ -1300,13 +1379,13 @@ export const Inspector: React.FC<InspectorProps> = ({
                 value={Number((p.strokeWidth || 0).toFixed(2))}
                 onChange={(v) => onUpdateLayerProperty(fillTargets, 'strokeWidth', Math.max(0, v))}
                 className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
-                data-tooltip="Grosor del trazo"
+                data-tooltip={t('Grosor del trazo')}
               />
               <span className="text-muted-foreground font-mono text-[10px]">px</span>
               </div>
               <Dropdown
                 value={selectedLayer.type === 'text' ? 'center' : (p.strokeAlign ?? 'center')}
-                options={STROKE_ALIGN_OPTIONS}
+                options={STROKE_ALIGN_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
                 onChange={(strokeAlign) => onUpdateLayerProperties(fillTargets, { strokeAlign })}
                 align="left"
                 size="sm"
@@ -1314,8 +1393,8 @@ export const Inspector: React.FC<InspectorProps> = ({
                 menuClassName="w-full"
                 /* A stroke 0 px wide has nothing to position */
                 disabled={selectedLayer.type === 'text' || !(p.strokeWidth > 0)}
-                title="Posición del trazo respecto al borde de la forma"
-                ariaLabel="Posición del trazo"
+                title={t('Posición del trazo respecto al borde de la forma')}
+                ariaLabel={t('Posición del trazo')}
               />
             </div>
             )}

@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Desktop } from '@phosphor-icons/react';
+import { t, useLanguage } from '../i18n';
 
 // Phones (any orientation) and small touch tablets: the editor needs room for the canvas,
 // the Inspector and the timeline, plus a keyboard and a precise pointer
@@ -18,6 +19,8 @@ const matchesSmallScreen = () => window.matchMedia(SMALL_SCREEN_QUERY).matches;
  * modos" opens the editor anyway for the rest of the session.
  */
 export function DesktopOnlyGate({ children }: { children: React.ReactNode }) {
+  // Rendered outside App: re-render here when the language changes
+  useLanguage();
   const [isSmall, setIsSmall] = useState(matchesSmallScreen);
   const [dismissed, setDismissed] = useState(() => {
     try {
@@ -48,21 +51,20 @@ export function DesktopOnlyGate({ children }: { children: React.ReactNode }) {
       <div className="max-w-sm w-full text-center space-y-5 animate-fade-in">
         <img src="/icon.svg" alt="Nori" className="w-16 h-16 mx-auto" />
         <div className="space-y-2">
-          <h1 className="text-xl font-bold font-heading">Nori es para escritorio</h1>
+          <h1 className="text-xl font-bold font-heading">{t('Nori es para escritorio')}</h1>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            El editor necesita una pantalla amplia para el lienzo, el Inspector y la línea del tiempo, además de
-            teclado y ratón o trackpad. Ábrelo desde una computadora para crear tus animaciones.
+            {t('El editor necesita una pantalla amplia para el lienzo, el Inspector y la línea del tiempo, además de teclado y ratón o trackpad. Ábrelo desde una computadora para crear tus animaciones.')}
           </p>
         </div>
         <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground bg-card border border-border rounded-xl px-3 py-2.5">
           <Desktop className="w-4 h-4 text-bento-blue shrink-0" />
-          <span>Disponible solo en computadoras de escritorio y portátiles</span>
+          <span>{t('Disponible solo en computadoras de escritorio y portátiles')}</span>
         </div>
         <button
           onClick={handleContinue}
           className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
         >
-          Continuar de todos modos
+          {t('Continuar de todos modos')}
         </button>
       </div>
     </div>

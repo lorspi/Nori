@@ -7,6 +7,7 @@ import {
   isValidProject,
   readWorkspace,
 } from './projectStorage';
+import { t } from '../i18n';
 
 // A backup is a .zip with a manifest (folders and the metadata of every project, trash
 // included) and one Nori JSON per project, so each project can also be opened on its own.
@@ -88,22 +89,22 @@ export async function readWorkspaceBackup(file: File): Promise<WorkspaceSnapshot
   try {
     entries = unzipSync(new Uint8Array(await file.arrayBuffer()));
   } catch {
-    throw new Error('El archivo no es un .zip válido o está dañado');
+    throw new Error(t('El archivo no es un .zip válido o está dañado'));
   }
 
   const manifestEntry = entries[MANIFEST_NAME];
-  if (!manifestEntry) throw new Error('El archivo no es un respaldo de Nori (falta nori-respaldo.json)');
+  if (!manifestEntry) throw new Error(t('El archivo no es un respaldo de Nori (falta nori-respaldo.json)'));
   let manifest: BackupManifest;
   try {
     manifest = JSON.parse(strFromU8(manifestEntry));
   } catch {
-    throw new Error('El índice del respaldo está dañado');
+    throw new Error(t('El índice del respaldo está dañado'));
   }
   if (manifest?.format !== BACKUP_FORMAT || !Array.isArray(manifest.projects)) {
-    throw new Error('El archivo no es un respaldo de Nori');
+    throw new Error(t('El archivo no es un respaldo de Nori'));
   }
   if (manifest.version > BACKUP_VERSION) {
-    throw new Error('El respaldo se creó con una versión más reciente de Nori; actualiza la aplicación');
+    throw new Error(t('El respaldo se creó con una versión más reciente de Nori; actualiza la aplicación'));
   }
 
   const folders: FolderMeta[] = (Array.isArray(manifest.folders) ? manifest.folders : [])
@@ -136,7 +137,7 @@ export async function readWorkspaceBackup(file: File): Promise<WorkspaceSnapshot
   }
 
   if (projects.length === 0 && folders.length === 0) {
-    throw new Error('El respaldo no contiene proyectos ni carpetas');
+    throw new Error(t('El respaldo no contiene proyectos ni carpetas'));
   }
   return { folders, projects };
 }

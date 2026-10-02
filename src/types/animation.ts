@@ -73,7 +73,8 @@ export interface PropertyTrack {
 }
 
 // 'capsule' and 'text' can no longer be added, but older projects and SVG imports still use them.
-// 'boolean' combines its child layers (the ones whose parentId points to it) into one shape.
+// 'boolean' combines its child layers (the ones whose parentId points to it) into one shape;
+// 'group' draws them one by one, each with its own style, under the group's transform and opacity.
 export type LayerType = 'rect' | 'ellipse' | 'polygon' | 'star' | 'path' | 'capsule' | 'text' | 'group' | 'boolean';
 
 // How a boolean group combines its children (as in Figma). Subtract removes every child from the
@@ -129,8 +130,8 @@ export interface Layer {
   id: string;
   name: string;
   type: LayerType;
-  // Boolean group that holds the layer. Its position, rotation and scale are relative to the group,
-  // and its fill, stroke and effects are not drawn (the group's are).
+  // Group that holds the layer. Its position, rotation and scale are relative to the group; inside a
+  // boolean group its fill, stroke and effects are not drawn (the group's are).
   parentId?: string;
   // Operation of a 'boolean' layer
   booleanOp?: BooleanOperation;
@@ -154,7 +155,7 @@ export interface Project {
   layers: Layer[];
 }
 
-export type ExportFormat = 'gif' | 'mp4' | 'webm' | 'svg';
+export type ExportFormat = 'gif' | 'mp4' | 'webm' | 'svg' | 'lottie';
 
 export interface ExportSettings {
   format: ExportFormat;
@@ -166,6 +167,11 @@ export interface ExportSettings {
   // Motion blur for video (MP4 / WebM): fraction of each frame the shutter stays open
   // (0 = off, 0.5 = 180°, 1 = 360°)
   motionBlur?: number;
+  // Antialiasing for GIF and video: frames are rendered this many times larger and scaled down
+  // (1 = off, 2 or 4; 2 when missing)
+  antialias?: number;
+  // Lottie: smaller file (fewer decimals and keyframes, no shape names)
+  lottieOptimized?: boolean;
 }
 
 // SVG export of boolean groups whose shapes move against each other: SVG masks (light and smooth,

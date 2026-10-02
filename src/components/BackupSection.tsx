@@ -18,6 +18,7 @@ import {
 import { useUI } from '../lib/ui';
 import { FolderMeta, ProjectMeta, writeWorkspace } from '../utils/projectStorage';
 import { downloadWorkspaceBackup, readWorkspaceBackup } from '../utils/workspaceBackup';
+import { t } from '../i18n';
 
 // Date of the last backup created in this browser, shown as a reminder
 const LAST_BACKUP_KEY = 'nori-last-backup';
@@ -33,7 +34,8 @@ function readLastBackup(): number | null {
 
 type ImportMode = 'merge' | 'replace';
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const projectCount = (count: number) => (count === 1 ? t('1 proyecto') : t('{count} proyectos', { count }));
+const folderCount = (count: number) => (count === 1 ? t('1 carpeta') : t('{count} carpetas', { count }));
 
 interface BackupSectionProps {
   projects: ProjectMeta[];
@@ -61,9 +63,9 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
       try {
         localStorage.setItem(LAST_BACKUP_KEY, String(now));
       } catch {}
-      toast(`Respaldo descargado: ${fileName}`, 'success');
+      toast(t('Respaldo descargado: {fileName}', { fileName }), 'success');
     } catch {
-      toast('No se pudo crear el respaldo', 'error');
+      toast(t('No se pudo crear el respaldo'), 'error');
     }
   };
 
@@ -74,15 +76,24 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
     setBusy(true);
     try {
       const backup = await readWorkspaceBackup(file);
-      const contents = `${plural(backup.projects.length, 'proyecto', 'proyectos')} y ${plural(backup.folders.length, 'carpeta', 'carpetas')}`;
+      const contents = t('{projects} y {folders}', {
+        projects: projectCount(backup.projects.length),
+        folders: folderCount(backup.folders.length),
+      });
 
       if (mode === 'replace') {
         const current = projects.length + trashed.length;
-        const currentText = `${plural(current, 'proyecto', 'proyectos')} (papelera incluida) y ${plural(folders.length, 'carpeta', 'carpetas')}`;
+        const currentText = t('{projects} (papelera incluida) y {folders}', {
+          projects: projectCount(current),
+          folders: folderCount(folders.length),
+        });
         const ok = await confirm({
-          title: 'Reemplazar el espacio de trabajo',
-          message: `El respaldo contiene ${contents}. Se eliminará todo lo que hay ahora en este navegador (${currentText}) y se reemplazará por el contenido del respaldo. Esta acción no se puede deshacer.`,
-          confirmLabel: 'Reemplazar todo',
+          title: t('Reemplazar el espacio de trabajo'),
+          message: t(
+            'El respaldo contiene {contents}. Se eliminará todo lo que hay ahora en este navegador ({current}) y se reemplazará por el contenido del respaldo. Esta acción no se puede deshacer.',
+            { contents, current: currentText }
+          ),
+          confirmLabel: t('Reemplazar todo'),
           variant: 'danger',
         });
         if (ok !== true) return;
@@ -90,22 +101,25 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
 
       const result = writeWorkspace(backup, mode);
       if (!result.ok) {
-        toast('No se pudo cargar el respaldo (espacio insuficiente en el navegador). No se cambió nada.', 'error');
+        toast(t('No se pudo cargar el respaldo (espacio insuficiente en el navegador). No se cambió nada.'), 'error');
         return;
       }
       onRestored();
       if (mode === 'replace') {
-        toast(`Espacio de trabajo reemplazado: ${contents}`, 'success');
+        toast(t('Espacio de trabajo reemplazado: {contents}', { contents }), 'success');
       } else if (result.projects + result.folders === 0) {
-        toast('Todo el contenido del respaldo ya estaba en este navegador', 'info');
+        toast(t('Todo el contenido del respaldo ya estaba en este navegador'), 'info');
       } else {
         toast(
-          `Respaldo cargado: se añadieron ${plural(result.projects, 'proyecto', 'proyectos')} y ${plural(result.folders, 'carpeta', 'carpetas')}`,
+          t('Respaldo cargado: se añadieron {projects} y {folders}', {
+            projects: projectCount(result.projects),
+            folders: folderCount(result.folders),
+          }),
           'success'
         );
       }
     } catch (err: any) {
-      toast(err?.message || 'No se pudo leer el respaldo', 'error');
+      toast(err?.message || t('No se pudo leer el respaldo'), 'error');
     } finally {
       setBusy(false);
     }
@@ -150,10 +164,10 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
         <div className="border-b border-border pb-6">
           <h1 className="text-2xl font-black text-foreground font-heading flex items-center gap-2">
             <Archive className="w-6 h-6 text-bento-blue shrink-0" />
-            Respaldo
+            {t('Respaldo')}
           </h1>
           <p className="text-muted-foreground text-xs mt-1.5 leading-relaxed max-w-2xl">
-            Un respaldo es un archivo .zip con todo tu espacio de trabajo: cada proyecto (también los de la papelera) y tus carpetas. Sirve para llevarte tu trabajo a otro navegador u otro equipo, o para guardarlo a salvo fuera del navegador. En el otro navegador abre Nori, ve a Respaldo y carga el archivo.
+            {t('Un respaldo es un archivo .zip con todo tu espacio de trabajo: cada proyecto (también los de la papelera) y tus carpetas. Sirve para llevarte tu trabajo a otro navegador u otro equipo, o para guardarlo a salvo fuera del navegador. En el otro navegador abre Nori, ve a Respaldo y carga el archivo.')}
           </p>
         </div>
 
@@ -161,22 +175,25 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
         <div className="p-4 bg-bento-orange-light border border-bento-orange/30 rounded-xl flex items-start gap-3 text-xs leading-relaxed">
           <Warning className="w-5 h-5 shrink-0 text-bento-orange" />
           <div className="text-foreground space-y-1.5">
-            <span className="font-semibold block text-bento-orange">Ten siempre un respaldo reciente</span>
+            <span className="font-semibold block text-bento-orange">{t('Ten siempre un respaldo reciente')}</span>
             <p>
-              Nori no tiene servidores: tus proyectos solo existen en el almacenamiento de este navegador. Si se borran los datos del sitio, se limpia el historial, se reinstala el navegador o cambias de equipo, <strong>se pierde todo lo que no hayas guardado fuera</strong>.
+              {t('Nori no tiene servidores: tus proyectos solo existen en el almacenamiento de este navegador. Si se borran los datos del sitio, se limpia el historial, se reinstala el navegador o cambias de equipo,')}{' '}
+              <strong>{t('se pierde todo lo que no hayas guardado fuera')}</strong>.
             </p>
-            <p>Hay dos formas de protegerte, y puedes usar las dos:</p>
+            <p>{t('Hay dos formas de protegerte, y puedes usar las dos:')}</p>
             <ul className="space-y-1 pl-1">
               <li className="flex items-start gap-2">
                 <Stack className="w-3.5 h-3.5 mt-0.5 shrink-0 text-bento-orange" />
                 <span>
-                  <strong>Respaldo completo</strong> (en esta página): un solo archivo con todo el espacio de trabajo. Lo más cómodo para migrar o para guardar todo de una vez.
+                  <strong>{t('Respaldo completo')}</strong>{' '}
+                  {t('(en esta página): un solo archivo con todo el espacio de trabajo. Lo más cómodo para migrar o para guardar todo de una vez.')}
                 </span>
               </li>
               <li className="flex items-start gap-2">
                 <FileArrowDown className="w-3.5 h-3.5 mt-0.5 shrink-0 text-bento-orange" />
                 <span>
-                  <strong>JSON de cada proyecto</strong>: desde el menú "…" de un proyecto (Descargar JSON) o con Ctrl + S en el editor. Útil para guardar o compartir proyectos sueltos.
+                  <strong>{t('JSON de cada proyecto')}</strong>
+                  {t(': desde el menú "…" de un proyecto (Descargar JSON) o con Ctrl + S en el editor. Útil para guardar o compartir proyectos sueltos.')}
                 </span>
               </li>
             </ul>
@@ -189,12 +206,19 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
             <div className="min-w-0">
               <h2 className="text-sm font-bold text-foreground font-heading flex items-center gap-2">
                 <DownloadSimple className="w-4 h-4 text-bento-blue" />
-                Crear respaldo
+                {t('Crear respaldo')}
               </h2>
               <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                Descarga un .zip con {plural(projects.length, 'proyecto', 'proyectos')}
-                {trashed.length > 0 && `, ${plural(trashed.length, 'proyecto', 'proyectos')} de la papelera`} y{' '}
-                {plural(folders.length, 'carpeta', 'carpetas')}. Dentro, cada proyecto es un JSON de Nori que también se puede abrir por separado.
+                {trashed.length > 0
+                  ? t('Descarga un .zip con {projects}, {trashed} de la papelera y {folders}. Dentro, cada proyecto es un JSON de Nori que también se puede abrir por separado.', {
+                      projects: projectCount(projects.length),
+                      trashed: projectCount(trashed.length),
+                      folders: folderCount(folders.length),
+                    })
+                  : t('Descarga un .zip con {projects} y {folders}. Dentro, cada proyecto es un JSON de Nori que también se puede abrir por separado.', {
+                      projects: projectCount(projects.length),
+                      folders: folderCount(folders.length),
+                    })}
               </p>
             </div>
             <button
@@ -203,7 +227,7 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
               className="h-8 px-3 rounded-lg border bg-bento-blue border-bento-blue text-white hover:bg-bento-blue/90 shadow-card text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
               <DownloadSimple className="w-4 h-4" />
-              Crear respaldo
+              {t('Crear respaldo')}
             </button>
           </div>
           <div
@@ -213,10 +237,10 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
           >
             {lastBackup ? <CheckCircle className="w-3.5 h-3.5 text-bento-green" /> : <Warning className="w-3.5 h-3.5" />}
             {lastBackup
-              ? `Último respaldo creado en este navegador: ${formatRelative(lastBackup)}`
+              ? t('Último respaldo creado en este navegador: {time}', { time: formatRelative(lastBackup) })
               : isEmpty
-                ? 'Aún no hay nada que respaldar'
-                : 'Todavía no has creado ningún respaldo en este navegador'}
+                ? t('Aún no hay nada que respaldar')
+                : t('Todavía no has creado ningún respaldo en este navegador')}
           </div>
         </section>
 
@@ -225,24 +249,24 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
           <div>
             <h2 className="text-sm font-bold text-foreground font-heading flex items-center gap-2">
               <UploadSimple className="w-4 h-4 text-bento-blue" />
-              Cargar respaldo
+              {t('Cargar respaldo')}
             </h2>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              Elige un respaldo de Nori (.zip) creado en este u otro navegador. Antes, decide qué hacer con lo que ya hay aquí:
+              {t('Elige un respaldo de Nori (.zip) creado en este u otro navegador. Antes, decide qué hacer con lo que ya hay aquí:')}
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Al cargar el respaldo">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label={t('Al cargar el respaldo')}>
             {modeOption(
               'merge',
-              'Mantener lo actual',
-              'Se añaden los proyectos y carpetas del respaldo junto a los que ya tienes. Lo que ya estaba igual no se duplica.',
+              t('Mantener lo actual'),
+              t('Se añaden los proyectos y carpetas del respaldo junto a los que ya tienes. Lo que ya estaba igual no se duplica.'),
               Browsers
             )}
             {modeOption(
               'replace',
-              'Reemplazar todo',
-              'Se borra todo el espacio de trabajo de este navegador (papelera incluida) y queda exactamente como en el respaldo.',
+              t('Reemplazar todo'),
+              t('Se borra todo el espacio de trabajo de este navegador (papelera incluida) y queda exactamente como en el respaldo.'),
               ArrowsClockwise
             )}
           </div>
@@ -258,7 +282,7 @@ export function BackupSection({ projects, trashed, folders, formatRelative, onRe
               }`}
             >
               <UploadSimple className={`w-4 h-4 ${mode === 'replace' ? '' : 'text-bento-blue'}`} />
-              {busy ? 'Cargando…' : 'Cargar respaldo'}
+              {busy ? t('Cargando…') : t('Cargar respaldo')}
             </button>
           </div>
           <input type="file" ref={fileInputRef} onChange={handleFile} accept=".zip,application/zip" className="hidden" />

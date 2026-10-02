@@ -51,6 +51,7 @@ import {
 } from './utils/animationTracks';
 import { useUI, ToastType } from './lib/ui';
 import { loadBooleanEngine } from './utils/booleanOps';
+import { t } from './i18n';
 import {
   BOOLEAN_LABELS,
   cloneLayerTree,
@@ -62,7 +63,8 @@ import {
   LayerDropPosition,
   moveLayer,
   setBooleanOperation,
-  ungroupBooleanGroup,
+  ungroupGroup,
+  createLayerGroup,
 } from './utils/booleanGroups';
 import {
   applyAffine,
@@ -179,7 +181,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     const timer = setTimeout(() => {
       if (!saveProject(project) && !storageWarnedRef.current) {
         storageWarnedRef.current = true;
-        showToast('No se pudo guardar el proyecto en el navegador (espacio insuficiente o almacenamiento bloqueado)', 'warning');
+        showToast(t('No se pudo guardar el proyecto en el navegador (espacio insuficiente o almacenamiento bloqueado)'), 'warning');
       }
     }, 400);
     return () => clearTimeout(timer);
@@ -223,7 +225,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     if (history.length === 0) {
       if (!emptyHistoryNotifiedRef.current) {
         emptyHistoryNotifiedRef.current = true;
-        showToast('No hay más acciones para deshacer');
+        showToast(t('No hay más acciones para deshacer'));
       }
       return;
     }
@@ -338,6 +340,16 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.code === 'KeyE') {
         e.preventDefault();
         if (!e.repeat) handleFlattenBoolean();
+        return;
+      }
+      // Groups: Ctrl + Alt + G groups the selection, adding Shift ungroups (Ctrl + G alone goes to
+      // the next keyframe)
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === 'KeyG') {
+        e.preventDefault();
+        if (!e.repeat) {
+          if (e.shiftKey) handleUngroupBoolean();
+          else handleGroupLayers();
+        }
         return;
       }
 
@@ -958,7 +970,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
       })),
     });
     showToast(
-      resolved.length === 1 ? 'Fotograma clave copiado' : `${resolved.length} fotogramas clave copiados`,
+      resolved.length === 1 ? t('Fotograma clave copiado') : t('{count} fotogramas clave copiados', { count: resolved.length }),
       'success'
     );
   };
@@ -977,7 +989,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     const layer = project.layers.find((l) => l.id === layerId);
     if (!layer || layer.tracks.length === 0) return;
     copyTimelineClipboard({ kind: 'layer', tracks: JSON.parse(JSON.stringify(layer.tracks)) });
-    showToast(`Animación de "${layer.name}" copiada`, 'success');
+    showToast(t('Animación de "{name}" copiada', { name: layer.name }), 'success');
   };
 
   // Paste the clipboard onto a layer, starting at the playhead (moved back if it wouldn't fit).
@@ -1051,9 +1063,15 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     if (targets.length > 1) handleSelectLayers(targetIds, layerId);
     else setSelectedLayerId(layerId);
     setSelectedKeyframes(pastedRefs);
-    const where = targets.length > 1 ? `en ${targets.length} capas` : `en "${targets[0].name}"`;
+    const count = targets.length;
     showToast(
-      clipboard.kind === 'layer' ? `Animación pegada ${where}` : targets.length > 1 ? `Fotogramas clave pegados ${where}` : 'Fotogramas clave pegados',
+      clipboard.kind === 'layer'
+        ? count > 1
+          ? t('Animación pegada en {count} capas', { count })
+          : t('Animación pegada en "{name}"', { name: targets[0].name })
+        : count > 1
+          ? t('Fotogramas clave pegados en {count} capas', { count })
+          : t('Fotogramas clave pegados'),
       'success'
     );
   };
@@ -1072,7 +1090,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     writeClipboardText(serializeClipboard(data)).then((ok) => {
       clipboardWriteFailedRef.current = !ok;
     });
-    if (!silent) showToast(tops.length === 1 ? `Capa "${tops[0].name}" copiada` : `${tops.length} capas copiadas`, 'success');
+    if (!silent) showToast(tops.length === 1 ? t('Capa "{name}" copiada', { name: tops[0].name }) : t('{count} capas copiadas', { count: tops.length }), 'success');
   };
 
   const handleCutLayers = (layerIds: string[]) => {
@@ -1080,7 +1098,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     if (count === 0) return;
     handleCopyLayers(layerIds, true);
     handleDeleteLayers(layerIds, true);
-    showToast(count === 1 ? 'Capa cortada' : `${count} capas cortadas`, 'success');
+    showToast(count === 1 ? t('Capa cortada') : t('{count} capas cortadas', { count }), 'success');
   };
 
   // Add layers above the top-most selected layer (or on top of everything) and select them
@@ -1107,8 +1125,16 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
   const pasteLayersClipboard = (data: LayersClipboard, withAnimation: boolean) => {
     const layers = instantiateClipboardLayers(data, projectRef.current, withAnimation);
     const roots = layers.filter((l) => !l.parentId);
-    const what = roots.length === 1 ? `Capa "${roots[0].name}" pegada` : `${roots.length} capas pegadas`;
-    insertLayers(layers, withAnimation ? what : `${what} sin animación`);
+    const params = { name: roots[0]?.name ?? '', count: roots.length };
+    const message =
+      roots.length === 1
+        ? withAnimation
+          ? t('Capa "{name}" pegada', params)
+          : t('Capa "{name}" pegada sin animación', params)
+        : withAnimation
+          ? t('{count} capas pegadas', params)
+          : t('{count} capas pegadas sin animación', params);
+    insertLayers(layers, message);
   };
 
   // SVG code from the clipboard becomes new layers, centred on the canvas
@@ -1117,19 +1143,22 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     try {
       result = await importSvg(svgText, projectRef.current.fps);
     } catch (err: any) {
-      showToast(`No se pudo pegar el SVG: ${err?.message || 'formato no válido'}`, 'error');
+      showToast(t('No se pudo pegar el SVG: {error}', { error: err?.message || t('formato no válido') }), 'error');
       return;
     }
     if (result.layers.length === 0) {
-      showToast('El SVG no contiene formas que se puedan pegar', 'warning');
+      showToast(t('El SVG no contiene formas que se puedan pegar'), 'warning');
       return;
     }
     const layers = placeSvgLayers(result.layers, result, projectRef.current, withAnimation);
-    const count = layers.length === 1 ? '1 capa' : `${layers.length} capas`;
-    const skipped = result.skipped > 0 ? ` · ${result.skipped} elementos no compatibles omitidos` : '';
+    const count = layers.length === 1 ? t('1 capa') : t('{count} capas', { count: layers.length });
+    const skipped =
+      result.skipped > 0 ? t(' · {count} elementos no compatibles omitidos', { count: result.skipped }) : '';
     insertLayers(
       layers,
-      result.animated && withAnimation ? `SVG animado pegado: ${count}${skipped}` : `SVG pegado: ${count}${skipped}`
+      result.animated && withAnimation
+        ? t('SVG animado pegado: {layers}{skipped}', { layers: count, skipped })
+        : t('SVG pegado: {layers}{skipped}', { layers: count, skipped })
     );
   };
 
@@ -1145,7 +1174,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
       }
       setClipboard(data.clipboard);
       if (selectedLayerId) handlePaste(selectedLayerId, data.clipboard);
-      else showToast('Selecciona una capa para pegar los fotogramas clave', 'info');
+      else showToast(t('Selecciona una capa para pegar los fotogramas clave'), 'info');
       return true;
     }
     if (content?.type === 'svg') {
@@ -1153,7 +1182,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
       return true;
     }
     if (content?.type === 'figma') {
-      showToast('Figma copia en un formato propio: en Figma usa "Copiar como SVG" para pegarlo aquí', 'info');
+      showToast(t('Figma copia en un formato propio: en Figma usa "Copiar como SVG" para pegarlo aquí'), 'info');
       return true;
     }
     if (fromKeyboard && clipboardWriteFailedRef.current) return pasteFromInAppClipboard(withAnimation);
@@ -1183,8 +1212,8 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     if (!pasted) {
       showToast(
         read.status === 'ok'
-          ? 'El portapapeles no contiene capas de Nori ni código SVG'
-          : 'El navegador no deja leer el portapapeles: usa Ctrl + V',
+          ? t('El portapapeles no contiene capas de Nori ni código SVG')
+          : t('El navegador no deja leer el portapapeles: usa Ctrl + V'),
         'warning'
       );
     }
@@ -1220,31 +1249,40 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     }
     const resolvedProbe: ClipboardProbe = probe === 'checking' ? { status: 'unknown' } : probe;
     return [
-      { label: 'Copiar', shortcut: 'Ctrl+C', disabled: !hasSelection, onSelect: () => handleCopyLayers(selectedLayerIds) },
-      { label: 'Cortar', shortcut: 'Ctrl+X', disabled: !hasSelection, onSelect: () => handleCutLayers(selectedLayerIds) },
+      { label: t('Copiar'), shortcut: 'Ctrl+C', disabled: !hasSelection, onSelect: () => handleCopyLayers(selectedLayerIds) },
+      { label: t('Cortar'), shortcut: 'Ctrl+X', disabled: !hasSelection, onSelect: () => handleCutLayers(selectedLayerIds) },
       {
-        label: probe === 'checking' ? 'Pegar (comprobando…)' : 'Pegar',
+        label: probe === 'checking' ? t('Pegar (comprobando…)') : t('Pegar'),
         shortcut: 'Ctrl+V',
         disabled: !canPaste,
         onSelect: () => handleMenuPaste(resolvedProbe, true),
       },
       {
-        label: 'Pegar sin animación',
+        label: t('Pegar sin animación'),
         shortcut: 'Ctrl+Shift+V',
         disabled: !canPaste,
         onSelect: () => handleMenuPaste(resolvedProbe, false),
       },
       'separator',
       {
-        label: 'Animaciones predeterminadas…',
+        label: t('Animaciones predeterminadas…'),
         disabled: !hasSelection,
         onSelect: () => setPresetTargetIds(selectedLayerIds),
       },
+      ...(hasSelection
+        ? ([
+            'separator',
+            { label: t('Agrupar'), shortcut: 'Ctrl+Alt+G', onSelect: () => handleGroupLayers() },
+            ...(selectedForBoolean?.type === 'group'
+              ? [{ label: t('Desagrupar'), shortcut: 'Ctrl+Shift+Alt+G', onSelect: () => handleUngroupBoolean() }]
+              : []),
+          ] as ContextMenuItem[])
+        : []),
       ...(booleanState.canCombine
         ? ([
             'separator',
             ...(['union', 'subtract', 'intersect', 'exclude'] as BooleanOperation[]).map((op) => ({
-              label: booleanState.activeOp === op ? `${BOOLEAN_LABELS[op].action} ✓` : BOOLEAN_LABELS[op].action,
+              label: booleanState.activeOp === op ? `${t(BOOLEAN_LABELS[op].action)} ✓` : t(BOOLEAN_LABELS[op].action),
               shortcut: BOOLEAN_LABELS[op].shortcut,
               onSelect: () => handleBooleanOperation(op),
             })),
@@ -1252,14 +1290,14 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
         : []),
       ...(booleanState.canFlatten
         ? ([
-            { label: 'Aplanar en un trazado', shortcut: 'Ctrl+E', onSelect: () => handleFlattenBoolean() },
-            { label: 'Desagrupar', onSelect: () => handleUngroupBoolean() },
+            { label: t('Aplanar en un trazado'), shortcut: 'Ctrl+E', onSelect: () => handleFlattenBoolean() },
+            { label: t('Desagrupar'), onSelect: () => handleUngroupBoolean() },
           ] as ContextMenuItem[])
         : []),
       'separator',
       {
-        label: selectedLayerIds.length > 1 ? `Eliminar ${selectedLayerIds.length} capas` : 'Eliminar',
-        shortcut: 'Supr',
+        label: selectedLayerIds.length > 1 ? t('Eliminar {count} capas', { count: selectedLayerIds.length }) : t('Eliminar'),
+        shortcut: t('Supr'),
         danger: true,
         disabled: !hasSelection,
         onSelect: () => handleDeleteLayers(selectedLayerIds),
@@ -1296,7 +1334,9 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     setSelectedKeyframes(refs);
     setPresetTargetIds(null);
     showToast(
-      `Animación "${preset.name}" añadida a ${targets.length === 1 ? `"${targets[0].name}"` : `${targets.length} capas`}`,
+      targets.length === 1
+        ? t('Animación "{preset}" añadida a "{name}"', { preset: t(preset.name), name: targets[0].name })
+        : t('Animación "{preset}" añadida a {count} capas', { preset: t(preset.name), count: targets.length }),
       'success'
     );
   };
@@ -1357,7 +1397,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
 
     const newLayer: Layer = {
       id,
-      name: `${names[shape]} ${count}`,
+      name: `${t(names[shape])} ${count}`,
       type,
       visible: true,
       locked: false,
@@ -1437,7 +1477,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     const [root, ...inside] = cloneLayerTree(project.layers, layerId);
     const copy: Layer = {
       ...root,
-      name: `${layer.name} Copia`,
+      name: `${layer.name} ${t('Copia')}`,
       properties: {
         ...root.properties,
         x: layer.properties.x + 20,
@@ -1464,7 +1504,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
       if (!tops.includes(layer.id)) return;
       const [root, ...inside] = cloneLayerTree(current, layer.id);
       copies[layer.id] = root.id;
-      layers.push({ ...root, name: `${layer.name} Copia` }, ...inside);
+      layers.push({ ...root, name: `${layer.name} ${t('Copia')}` }, ...inside);
     });
     setProject((prev) => ({ ...prev, layers: normalizeLayerTree(layers) }));
     const ids = Object.values(copies);
@@ -1484,7 +1524,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     const remaining = selectedLayerIds.filter((id) => !removed.has(id));
     handleSelectLayers(remaining, remaining.includes(selectedLayerId ?? '') ? selectedLayerId : (remaining[0] ?? null));
     setSelectedKeyframes((prev) => prev.filter((r) => !removed.has(r.layerId)));
-    if (count > 1 && !silent) showToast(`${count} capas eliminadas`, 'success');
+    if (count > 1 && !silent) showToast(t('{count} capas eliminadas', { count }), 'success');
   };
 
   // ── Boolean groups ──────────────────────────────────────────────────────────
@@ -1497,7 +1537,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
       if (selected.booleanOp === op) return;
       recordHistory(current);
       setProject({ ...current, layers: setBooleanOperation(current.layers, selected.id, op) });
-      showToast(`Operación cambiada a ${BOOLEAN_LABELS[op].name}`, 'success');
+      showToast(t('Operación cambiada a {operation}', { operation: t(BOOLEAN_LABELS[op].name) }), 'success');
       return;
     }
     const result = createBooleanGroup(current.layers, selectedLayerIds, op, currentTime);
@@ -1517,11 +1557,11 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
   const handleFlattenBoolean = async (layerId: string | null = selectedLayerId) => {
     const target = getLayer(projectRef.current.layers, layerId);
     if (target?.type !== 'boolean') {
-      showToast('Selecciona un grupo booleano para aplanarlo', 'info');
+      showToast(t('Selecciona un grupo booleano para aplanarlo'), 'info');
       return;
     }
     if (!(await loadBooleanEngine())) {
-      showToast('No se pudo cargar el motor de operaciones booleanas. Revisa la conexión e inténtalo de nuevo.', 'error');
+      showToast(t('No se pudo cargar el motor de operaciones booleanas. Revisa la conexión e inténtalo de nuevo.'), 'error');
       return;
     }
     const current = projectRef.current;
@@ -1534,15 +1574,33 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     setProject({ ...current, layers: result.layers });
     setSelectedLayerId(result.selectId);
     setSelectedKeyframes((prev) => prev.filter((r) => result.layers.some((l) => l.id === r.layerId)));
-    showToast(`"${target.name}" aplanado en un trazado`, 'success');
+    showToast(t('"{name}" aplanado en un trazado', { name: target.name }), 'success');
   };
 
-  // Takes the shapes out of the group, where they are on the canvas
+  // Puts the selected layers in a plain group, to animate them together
+  const handleGroupLayers = () => {
+    const current = projectRef.current;
+    const result = createLayerGroup(current.layers, selectedLayerIds, currentTime);
+    if ('error' in result) {
+      showToast(result.error, 'info');
+      return;
+    }
+    recordHistory(current);
+    setProject({ ...current, layers: result.layers });
+    setSelectedLayerId(result.selectId);
+    setSelectedKeyframes([]);
+    setVertexEditLayerId(null);
+  };
+
+  // Takes the layers out of the group (plain or boolean), where they are on the canvas
   const handleUngroupBoolean = (layerId: string | null = selectedLayerId) => {
     const current = projectRef.current;
     const target = getLayer(current.layers, layerId);
-    if (target?.type !== 'boolean') return;
-    const result = ungroupBooleanGroup(current.layers, target.id, currentTime);
+    if (target?.type !== 'boolean' && target?.type !== 'group') {
+      showToast(t('Selecciona un grupo para desagruparlo'), 'info');
+      return;
+    }
+    const result = ungroupGroup(current.layers, target.id, currentTime);
     if ('error' in result) {
       showToast(result.error, 'info');
       return;
@@ -1553,8 +1611,8 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     setSelectedKeyframes((prev) => prev.filter((r) => r.layerId !== target.id));
     showToast(
       result.lostAnimation
-        ? `Grupo desagrupado. Las formas quedan como se ven ahora: la animación de posición, escala o rotación del grupo no se conserva`
-        : 'Grupo desagrupado',
+        ? t('Grupo desagrupado. Las capas quedan como se ven ahora: la animación de posición, escala, rotación u opacidad del grupo no se conserva')
+        : t('Grupo desagrupado'),
       result.lostAnimation ? 'warning' : 'success'
     );
   };
@@ -1574,7 +1632,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     handleSelectLayers(kept.length > 0 ? kept : [layerId], kept.includes(selectedLayerId ?? '') ? selectedLayerId : layerId);
   };
 
-  // What the boolean controls (top bar, menus) can do with the current selection
+  // What the boolean controls (Inspector, context menu) can do with the current selection
   const selectedForBoolean = getLayer(project.layers, selectedLayerId);
   const booleanState = {
     canCombine:
@@ -1588,7 +1646,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
   // Download the project as a Nori JSON file
   const handleDownloadJson = () => {
     const fileName = downloadProjectJson(projectRef.current);
-    showToast(`Proyecto descargado: ${fileName}`, 'success');
+    showToast(t('Proyecto descargado: {fileName}', { fileName }), 'success');
   };
 
   const selectedLayer = project.layers.find((l) => l.id === selectedLayerId) || null;
@@ -1623,13 +1681,9 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
         onRenameProject={(title) => {
           recordHistory(project);
           setProject((prev) => ({ ...prev, title }));
-          showToast(`Proyecto renombrado a "${title}"`, 'success');
+          showToast(t('Proyecto renombrado a "{title}"', { title }), 'success');
         }}
         onAddLayer={handleAddLayer}
-        booleanState={booleanState}
-        onBooleanOperation={handleBooleanOperation}
-        onFlattenBoolean={() => handleFlattenBoolean()}
-        onUngroupBoolean={() => handleUngroupBoolean()}
       />
 
       {/* 2. Middle Workspace: Canvas + Inspector */}
@@ -1688,6 +1742,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
           onBooleanOperation={handleBooleanOperation}
           onFlattenBoolean={(id) => handleFlattenBoolean(id)}
           onUngroupBoolean={(id) => handleUngroupBoolean(id)}
+          onGroupLayers={handleGroupLayers}
           onSelectLayer={setSelectedLayerId}
           currentTime={currentTime}
         />

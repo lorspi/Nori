@@ -3,6 +3,8 @@ import { GifEncoder } from './gifEncoder';
 import { renderProjectFrame } from './renderer';
 import { exportToAnimatedSvg } from './svgExporter';
 import { prepareBooleanEngine } from './booleanOps';
+import { exportToLottie } from './lottieExporter';
+import { t } from '../i18n';
 
 export interface ExportProgress {
   frame: number;
@@ -12,6 +14,79 @@ export interface ExportProgress {
 }
 
 export type ProgressCallback = (progress: ExportProgress) => void;
+
+// ── Antialiasing ────────────────────────────────────────────────────────────
+
+// Supersampling factors offered for GIF and video (1 = off)
+export const ANTIALIAS_LEVELS = [1, 2, 4] as const;
+export const DEFAULT_ANTIALIAS = 2;
+
+// Larger canvases fail or get very slow in some browsers
+const MAX_SUPERSAMPLE_SIDE = 8192;
+const MAX_SUPERSAMPLE_AREA = 36_000_000;
+
+/** Factor actually used for an output size: halved until the large canvas fits */
+export function getAntialiasFactor(width: number, height: number, requested = DEFAULT_ANTIALIAS): number {
+  let factor = ANTIALIAS_LEVELS.includes(requested as 1 | 2 | 4) ? requested : DEFAULT_ANTIALIAS;
+  while (
+    factor > 1 &&
+    (width * factor > MAX_SUPERSAMPLE_SIDE || height * factor > MAX_SUPERSAMPLE_SIDE || width * height * factor * factor > MAX_SUPERSAMPLE_AREA)
+  ) {
+    factor /= 2;
+  }
+  return factor;
+}
+
+/**
+ * Draws frames at the export size with antialiasing: each frame is rendered factor times larger
+ * and then halved (once for 2x, twice for 4x). Every halving averages 2 × 2 pixels, so a 4x
+ * frame averages 16 samples per pixel and edges come out smooth instead of jagged.
+ */
+function createFrameRenderer(project: Project, settings: ExportSettings, width: number, height: number) {
+  const factor = getAntialiasFactor(width, height, settings.antialias);
+  const options = {
+    transparent: settings.transparent,
+    backgroundColor: settings.backgroundColor,
+    drawCheckerboard: false,
+  };
+  if (factor === 1) {
+    return (ctx: CanvasRenderingContext2D, time: number) => {
+      ctx.clearRect(0, 0, width, height);
+      renderProjectFrame(ctx, project, time, { ...options, scale: settings.scale });
+    };
+  }
+
+  // Canvases from the largest to the output size
+  const steps: CanvasRenderingContext2D[] = [];
+  for (let f = factor; f > 1; f /= 2) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width * f;
+    canvas.height = height * f;
+    const stepCtx = canvas.getContext('2d');
+    if (!stepCtx) throw new Error('Could not get 2d context for antialiasing');
+    steps.push(stepCtx);
+  }
+  const halve = (from: CanvasRenderingContext2D, to: CanvasRenderingContext2D) => {
+    const { width: w, height: h } = to.canvas;
+    to.setTransform(1, 0, 0, 1, 0, 0);
+    to.globalAlpha = 1;
+    to.globalCompositeOperation = 'source-over';
+    to.clearRect(0, 0, w, h);
+    to.imageSmoothingEnabled = true;
+    to.imageSmoothingQuality = 'high';
+    to.drawImage(from.canvas, 0, 0, w, h);
+  };
+
+  return (ctx: CanvasRenderingContext2D, time: number) => {
+    const big = steps[0];
+    big.setTransform(1, 0, 0, 1, 0, 0);
+    big.clearRect(0, 0, big.canvas.width, big.canvas.height);
+    // Fills the largest canvas (width × factor, the output width rounded like the export size)
+    renderProjectFrame(big, project, time, { ...options, scale: (width * factor) / project.width });
+    for (let i = 1; i < steps.length; i++) halve(steps[i - 1], steps[i]);
+    halve(steps[steps.length - 1], ctx);
+  };
+}
 
 /**
  * Exports project to GIF with frame-by-frame precision and transparency support
@@ -35,18 +110,13 @@ export async function exportToGif(
   if (!ctx) throw new Error('Could not get 2d context for GIF export');
 
   const encoder = new GifEncoder(width, height, settings.loop);
+  const drawFrame = createFrameRenderer(project, settings, width, height);
 
   for (let frame = 0; frame < totalFrames; frame++) {
     const currentTime = (frame / totalFrames) * project.duration;
 
     // Render frame
-    ctx.clearRect(0, 0, width, height);
-    renderProjectFrame(ctx, project, currentTime, {
-      scale: settings.scale,
-      transparent: settings.transparent,
-      backgroundColor: settings.backgroundColor,
-      drawCheckerboard: false,
-    });
+    drawFrame(ctx, currentTime);
 
     const imageData = ctx.getImageData(0, 0, width, height);
     encoder.addFrame(imageData, {
@@ -59,7 +129,7 @@ export async function exportToGif(
         frame: frame + 1,
         totalFrames,
         percentage: Math.round(((frame + 1) / totalFrames) * 90),
-        stage: `Renderizando fotograma ${frame + 1} de ${totalFrames}...`,
+        stage: t('Renderizando fotograma {frame} de {total}...', { frame: frame + 1, total: totalFrames }),
       });
     }
 
@@ -74,7 +144,7 @@ export async function exportToGif(
       frame: totalFrames,
       totalFrames,
       percentage: 95,
-      stage: 'Comprimiendo archivo GIF...',
+      stage: t('Comprimiendo archivo GIF...'),
     });
   }
 
@@ -85,7 +155,7 @@ export async function exportToGif(
       frame: totalFrames,
       totalFrames,
       percentage: 100,
-      stage: '¡Exportación completada!',
+      stage: t('¡Exportación completada!'),
     });
   }
 
@@ -102,11 +172,11 @@ export const motionBlurSamples = (shutter: number) => Math.max(4, Math.min(16, M
  */
 function renderMotionBlurFrame(
   sampleCtx: CanvasRenderingContext2D,
+  drawFrame: (ctx: CanvasRenderingContext2D, time: number) => void,
   project: Project,
   time: number,
   frameDuration: number,
   shutter: number,
-  settings: ExportSettings,
   acc: Uint32Array,
   out: ImageData
 ) {
@@ -116,13 +186,7 @@ function renderMotionBlurFrame(
   acc.fill(0);
   for (let s = 0; s < samples; s++) {
     const t = Math.max(0, Math.min(project.duration, time + (s / (samples - 1) - 0.5) * span));
-    sampleCtx.clearRect(0, 0, width, height);
-    renderProjectFrame(sampleCtx, project, t, {
-      scale: settings.scale,
-      transparent: settings.transparent,
-      backgroundColor: settings.backgroundColor,
-      drawCheckerboard: false,
-    });
+    drawFrame(sampleCtx, t);
     const data = sampleCtx.getImageData(0, 0, width, height).data;
     for (let i = 0; i < data.length; i += 4) {
       const a = data[i + 3];
@@ -226,31 +290,21 @@ export async function exportToVideo(
       })()
     : null;
 
+  const drawFrame = createFrameRenderer(project, settings, width, height);
+
   // Render initial frame
-  if (!blurred) {
-    renderProjectFrame(ctx, project, 0, {
-      scale: settings.scale,
-      transparent: settings.transparent,
-      backgroundColor: settings.backgroundColor,
-    });
-  }
+  if (!blurred) drawFrame(ctx, 0);
 
   for (let frame = 0; frame < totalFrames; frame++) {
     const currentTime = (frame / totalFrames) * project.duration;
 
     if (blurred) {
       recorder.pause();
-      renderMotionBlurFrame(blurred.sampleCtx, project, currentTime, project.duration / totalFrames, shutter, settings, blurred.acc, blurred.out);
+      renderMotionBlurFrame(blurred.sampleCtx, drawFrame, project, currentTime, project.duration / totalFrames, shutter, blurred.acc, blurred.out);
       recorder.resume();
       ctx.putImageData(blurred.out, 0, 0);
     } else {
-      ctx.clearRect(0, 0, width, height);
-      renderProjectFrame(ctx, project, currentTime, {
-        scale: settings.scale,
-        transparent: settings.transparent,
-        backgroundColor: settings.backgroundColor,
-        drawCheckerboard: false,
-      });
+      drawFrame(ctx, currentTime);
     }
 
     if (onProgress) {
@@ -258,7 +312,7 @@ export async function exportToVideo(
         frame: frame + 1,
         totalFrames,
         percentage: Math.round(((frame + 1) / totalFrames) * 90),
-        stage: `Grabando fotograma ${frame + 1} de ${totalFrames}...`,
+        stage: t('Grabando fotograma {frame} de {total}...', { frame: frame + 1, total: totalFrames }),
       });
     }
 
@@ -272,7 +326,7 @@ export async function exportToVideo(
       frame: totalFrames,
       totalFrames,
       percentage: 95,
-      stage: 'Empaquetando video...',
+      stage: t('Empaquetando video...'),
     });
   }
 
@@ -283,7 +337,7 @@ export async function exportToVideo(
       frame: totalFrames,
       totalFrames,
       percentage: 100,
-      stage: '¡Video listo para descargar!',
+      stage: t('¡Video listo para descargar!'),
     });
   }
 
@@ -321,7 +375,7 @@ export async function exportProject(
 
     case 'svg': {
       if (onProgress) {
-        onProgress({ frame: 1, totalFrames: 1, percentage: 50, stage: 'Generando SVG vectorial animado...' });
+        onProgress({ frame: 1, totalFrames: 1, percentage: 50, stage: t('Generando SVG vectorial animado...') });
       }
       const svgString = exportToAnimatedSvg(project, {
         transparent: settings.transparent,
@@ -330,9 +384,20 @@ export async function exportProject(
       });
       const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
       if (onProgress) {
-        onProgress({ frame: 1, totalFrames: 1, percentage: 100, stage: '¡SVG generado con éxito!' });
+        onProgress({ frame: 1, totalFrames: 1, percentage: 100, stage: t('¡SVG generado con éxito!') });
       }
       return { blob, filename: `${baseName}.svg` };
+    }
+
+    case 'lottie': {
+      const { json } = exportToLottie(project, {
+        fps: settings.fps,
+        transparent: settings.transparent,
+        backgroundColor: settings.backgroundColor,
+        optimized: settings.lottieOptimized,
+      });
+      const blob = new Blob([json], { type: 'application/json' });
+      return { blob, filename: `${baseName}${settings.lottieOptimized ? '.min' : ''}.json` };
     }
 
     default:

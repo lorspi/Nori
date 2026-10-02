@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.4.0] — 2026-10-02
+
+### Added
+
+- **Grupos de capas**
+  Las capas seleccionadas se agrupan con Ctrl + Alt + G, con "Agrupar" en el menú del clic derecho o con "Agrupar N capas" en el Inspector. A diferencia de un grupo booleano, cada capa del grupo se sigue dibujando con su propio relleno, trazo, efectos y animación; el grupo añade su propia posición, punto de anclaje, escala, rotación, opacidad y desenfoque, que se animan como en cualquier capa y se aplican a todas las capas a la vez. Así se puede, por ejemplo, mover y girar un personaje entero mientras cada parte hace su propia animación. La opacidad y el desenfoque del grupo se aplican al conjunto, como si fuera una sola imagen: las capas que se superponen no se transparentan entre sí.
+
+- **Trabajar dentro de un grupo**
+  Como en los grupos booleanos, un clic en el lienzo selecciona el grupo entero y un doble clic, la capa que está bajo el cursor; desde ahí los clics eligen entre las capas del grupo, Esc vuelve a seleccionar el grupo y un clic fuera de él sale. Con el grupo seleccionado se ven los contornos de sus capas. En la línea del tiempo, el grupo tiene un ícono de carpeta y sus capas aparecen debajo, con sangría; una capa se mete en un grupo o se saca de él arrastrando su fila, y los grupos pueden contener otros grupos y grupos booleanos. El Inspector de una capa del grupo recuerda que su posición es relativa al grupo y tiene un enlace para seleccionarlo.
+
+- **Desagrupar**
+  Ctrl + Shift + Alt + G, "Desagrupar" en el Inspector o en el menú del clic derecho saca las capas del grupo, en el lugar donde se ven, y elimina el grupo. La opacidad del grupo pasa a sus capas para que se vean igual. Copiar, cortar, duplicar y borrar un grupo se lleva sus capas, y un grupo que se queda sin capas desaparece.
+
+- **Grupos en las exportaciones**
+  Los grupos se exportan a GIF, MP4, WebM y SVG tal como se ven en el lienzo; en el SVG cada grupo es un elemento `<g>` con su propia animación.
+
+- **Interfaz en español e inglés**
+  Un nuevo selector de idioma, junto al botón del tema en la barra superior y en la barra lateral de Inicio, cambia toda la interfaz entre español e inglés al instante, sin recargar ni perder el trabajo. La primera vez, Nori usa el idioma del navegador: español o inglés si es uno de los dos, e inglés si es cualquier otro. La elección se recuerda en ese navegador. En inglés, los números se muestran con punto decimal y las fechas en formato inglés; en los campos numéricos se puede escribir un punto o una coma en los dos idiomas.
+
+- **Antialiasing en GIF y video**
+  La ventana de exportar tiene un nuevo parámetro "Antialiasing" para GIF, MP4 y WebM: Desactivado, 2x (recomendado, el valor por defecto) o 4x (máxima calidad). Cada fotograma se dibuja 2 o 4 veces más grande y se reduce al tamaño final, así que los bordes y las curvas se ven suaves en lugar de pixelados o dentados. 4x tarda más en renderizar; a resoluciones muy grandes se usa automáticamente 2x para que el navegador pueda dibujar el fotograma. El render muestra el antialiasing que se usó. En un GIF con fondo transparente el borde contra el fondo no puede suavizarse (el formato solo tiene píxeles opacos o transparentes), y la ventana lo avisa.
+
+- **Exportación a Lottie, normal u optimizada**
+  "Lottie" es un nuevo formato en la ventana de exportar. Genera un JSON de Lottie (Bodymovin) que se reproduce en sitios web y apps con lottie-web, en iOS, Android y LottieFiles. Se elige entre dos versiones, cada una con su tamaño a la vista: Normal, con todos los fotogramas clave, tres decimales y los nombres de las formas, y Optimizado, un archivo más pequeño para web y apps, con menos decimales, sin los fotogramas clave que no cambian el movimiento y sin nombres de formas (`nombre.min.json`). Como el SVG, no necesita renderizarse.
+  Cada capa se exporta con su posición, punto de anclaje, escala, rotación, opacidad, relleno, trazo y tiempos; los rectángulos y las elipses conservan su forma nativa, y los polígonos, estrellas, trazados y grupos booleanos se escriben como trazados Bézier, también cuando se transforman. Los grupos se exportan como grupos de Lottie, así que su transformación y su opacidad se aplican a todas sus capas. Las curvas Bézier (linear, ease, back y las personalizadas) se escriben tal cual; spring y bounce, que Lottie no tiene, se convierten en un fotograma clave por fotograma. El fondo se añade como una capa sólida salvo que se elija fondo transparente. Lo que Lottie no puede mostrar igual se avisa en la ventana: las sombras y los textos no se exportan, los trazos interiores y exteriores quedan centrados y el desenfoque se exporta como efecto de Lottie, que algunos reproductores no muestran.
+
+### Fixed
+
+- **La ventana de exportar cabe en la pantalla**
+  En pantallas bajas, la ventana de exportar ya no se sale por arriba ni por abajo: se ajusta a la altura de la ventana del navegador, con un margen alrededor, y sus opciones y la vista previa se desplazan con scroll cuando no caben. El encabezado y los botones de abajo quedan siempre a la vista.
+
+- **Exportar GIF con TypeScript reciente**
+  Se corrige un error de tipos al crear el archivo GIF que hacía fallar `npm run lint`.
+
 ## [1.3.2] — 2026-10-02
 
 ### Added

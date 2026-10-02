@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AnimatableProperty } from '../types/animation';
 import { PROPERTY_META } from '../utils/animationTracks';
 import { ColorSwatch, isNoColor, toHexColor } from './ColorSwatch';
-import { formatDecimal, parseDecimal } from './NumberInput';
+import { formatDecimal, parseDecimal, toDecimalSeparator } from './NumberInput';
+import { t } from '../i18n';
 
 // Properties stored as a fraction (0–1, or 1 = 100 % scale) and shown in %
 const PERCENT_PROPERTIES = new Set<AnimatableProperty>(['scaleX', 'scaleY', 'opacity', 'fillOpacity', 'strokeOpacity']);
@@ -53,7 +54,7 @@ export const TrackValue: React.FC<TrackValueProps> = ({ property, value, onChang
         <ColorSwatch
           value={color}
           onChange={(c, recordUndo) => onChange(c, recordUndo)}
-          title={PROPERTY_META[property].label}
+          title={t(PROPERTY_META[property].label)}
           className="w-3.5 h-3.5 rounded-sm"
         />
       </span>
@@ -84,8 +85,8 @@ export const TrackValue: React.FC<TrackValueProps> = ({ property, value, onChang
         type="text"
         inputMode="decimal"
         value={draft}
-        // A point is turned into the decimal comma
-        onChange={(e) => setDraft(e.target.value.replace(/\./g, ','))}
+        // A point or a comma is turned into the language's decimal separator
+        onChange={(e) => setDraft(toDecimalSeparator(e.target.value))}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
@@ -95,7 +96,7 @@ export const TrackValue: React.FC<TrackValueProps> = ({ property, value, onChang
             setDraft(null);
           }
         }}
-        aria-label={PROPERTY_META[property].label}
+        aria-label={t(PROPERTY_META[property].label)}
         className="w-14 h-5 bg-card border border-bento-blue rounded px-1 text-right font-mono text-foreground focus:outline-none"
       />
     );
@@ -141,7 +142,7 @@ export const TrackValue: React.FC<TrackValueProps> = ({ property, value, onChang
     <span
       onPointerDown={handlePointerDown}
       className="font-mono text-bento-blue cursor-ew-resize touch-none select-none hover:underline decoration-dotted underline-offset-2"
-      data-tooltip="Arrastra a los lados para cambiar el valor o haz clic para escribirlo. Más rápido con"
+      data-tooltip={t('Arrastra a los lados para cambiar el valor o haz clic para escribirlo. Más rápido con')}
       data-shortcut="Shift"
     >
       {formatDecimal(shown)}

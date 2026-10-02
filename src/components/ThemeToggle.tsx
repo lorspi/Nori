@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Sun, Moon } from '@phosphor-icons/react';
+import { t } from '../i18n';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -48,7 +49,7 @@ export default function ThemeToggle() {
     } catch {}
   }, [theme]);
 
-  const label = isDark ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro';
+  const label = isDark ? t('Cambiar a tema claro') : t('Cambiar a tema oscuro');
 
   // The icon shows the theme the button switches to: the sun in dark mode, the moon in light mode
   return (

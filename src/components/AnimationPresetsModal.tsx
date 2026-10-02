@@ -10,6 +10,7 @@ import {
 } from '../utils/animationPresets';
 import { getLayerPropertiesAtTime } from '../utils/interpolator';
 import { Dropdown } from './Dropdown';
+import { t } from '../i18n';
 
 interface AnimationPresetsModalProps {
   isOpen: boolean;
@@ -25,7 +26,7 @@ interface AnimationPresetsModalProps {
 const LENGTHS = [0.3, 0.5, 0.8, 1, 1.5, 2];
 const DEFAULT_LENGTH: Record<PresetCategory, number> = { in: 0.5, out: 0.5, inOut: 0.5, emphasis: 1 };
 const PREVIEW_DISTANCE = 30;
-const fmt = (t: number) => `${t.toFixed(2)} s`;
+const fmt = (seconds: number) => `${seconds.toFixed(2)} s`;
 
 // Thumbnail: a square animated with the preset itself (same interpolation as the editor)
 // while the card is hovered or focused
@@ -98,14 +99,21 @@ export const AnimationPresetsModal: React.FC<AnimationPresetsModalProps> = ({
   const length = lengths[category];
   const presets = ANIMATION_PRESETS.filter((p) => p.category === category);
   const spans = planPresetSpans(category, currentTime, length, projectDuration, fps);
-  const target =
-    targetNames.length === 1 ? `«${targetNames[0]}»` : `${targetNames.length} capas`;
+  const subtitle =
+    targetNames.length === 1
+      ? t('Pasa el ratón para ver la animación y haz clic para añadirla a «{name}»', { name: targetNames[0] })
+      : t('Pasa el ratón para ver la animación y haz clic para añadirla a {count} capas', { count: targetNames.length });
   const timing =
     category === 'inOut'
-      ? `Entrada de ${fmt(spans.in!.start)} a ${fmt(spans.in!.end)} · salida de ${fmt(spans.out!.start)} a ${fmt(spans.out!.end)}`
+      ? t('Entrada de {inStart} a {inEnd} · salida de {outStart} a {outEnd}', {
+          inStart: fmt(spans.in!.start),
+          inEnd: fmt(spans.in!.end),
+          outStart: fmt(spans.out!.start),
+          outEnd: fmt(spans.out!.end),
+        })
       : (() => {
           const span = spans.in ?? spans.out ?? spans.main!;
-          return `De ${fmt(span.start)} a ${fmt(span.end)}`;
+          return t('De {start} a {end}', { start: fmt(span.start), end: fmt(span.end) });
         })();
 
   return (
@@ -123,16 +131,14 @@ export const AnimationPresetsModal: React.FC<AnimationPresetsModalProps> = ({
               <Sparkle className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-sm font-bold text-foreground font-heading">Animaciones predeterminadas</h2>
-              <span className="text-[11px] text-muted-foreground block truncate">
-                Pasa el ratón para ver la animación y haz clic para añadirla a {target}
-              </span>
+              <h2 className="text-sm font-bold text-foreground font-heading">{t('Animaciones predeterminadas')}</h2>
+              <span className="text-[11px] text-muted-foreground block truncate">{subtitle}</span>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            data-tooltip="Cerrar"
+            data-tooltip={t('Cerrar')}
             data-shortcut="Esc"
           >
             <X className="w-4 h-4" />
@@ -153,19 +159,19 @@ export const AnimationPresetsModal: React.FC<AnimationPresetsModalProps> = ({
                     ? 'bg-card text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
-                data-tooltip={c.hint}
+                data-tooltip={t(c.hint)}
               >
-                {c.label}
+                {t(c.label)}
               </button>
             ))}
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>{category === 'inOut' ? 'Duración de cada parte' : 'Duración'}</span>
+            <span>{category === 'inOut' ? t('Duración de cada parte') : t('Duración')}</span>
             <Dropdown
               value={length}
               options={LENGTHS.map((l) => ({ value: l, label: `${l} s` }))}
               onChange={(l) => setLengths((prev) => ({ ...prev, [category]: l }))}
-              ariaLabel="Duración de la animación"
+              ariaLabel={t('Duración de la animación')}
               className="w-24"
             />
           </div>
@@ -186,7 +192,7 @@ export const AnimationPresetsModal: React.FC<AnimationPresetsModalProps> = ({
               >
                 <PresetPreview preset={preset} active={hovered === preset.id} />
                 <span className="mt-1.5 block px-0.5 text-[11px] font-medium text-foreground group-hover:text-bento-blue truncate">
-                  {preset.name}
+                  {t(preset.name)}
                 </span>
               </button>
             ))}
@@ -196,7 +202,7 @@ export const AnimationPresetsModal: React.FC<AnimationPresetsModalProps> = ({
         {/* Footer */}
         <div className="px-5 py-3 border-t border-border bg-secondary/40 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
           <span>{timing}</span>
-          <span className="hidden sm:inline">Reemplaza los fotogramas clave de los mismos parámetros en ese tramo</span>
+          <span className="hidden sm:inline">{t('Reemplaza los fotogramas clave de los mismos parámetros en ese tramo')}</span>
         </div>
       </div>
     </div>

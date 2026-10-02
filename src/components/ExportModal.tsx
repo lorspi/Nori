@@ -13,13 +13,25 @@ import {
   Eye,
   Wind,
   UniteSquare,
+  FileJs,
+  Lightning,
+  Info,
 } from '@phosphor-icons/react';
 import { ExportFormat, ExportSettings, Project, SvgBooleanMode } from '../types/animation';
-import { exportProject, ExportProgress, motionBlurSamples } from '../utils/videoExporter';
+import {
+  ANTIALIAS_LEVELS,
+  DEFAULT_ANTIALIAS,
+  exportProject,
+  ExportProgress,
+  getAntialiasFactor,
+  motionBlurSamples,
+} from '../utils/videoExporter';
+import { exportToLottie } from '../utils/lottieExporter';
 import { exportToAnimatedSvg, hasAnimatedBooleanGroups } from '../utils/svgExporter';
 import { hasBooleanLayers, useBooleanEngine } from '../utils/booleanOps';
 import { ColorSwatch, HexColorInput, isNoColor } from './ColorSwatch';
 import { Dropdown } from './Dropdown';
+import { t, useLanguage } from '../i18n';
 
 interface ExportModalProps {
   project: Project;
@@ -27,14 +39,36 @@ interface ExportModalProps {
   onClose: () => void;
 }
 
-type RasterFormat = Exclude<ExportFormat, 'svg'>;
+// Formats rendered frame by frame (SVG and Lottie are generated live)
+type RasterFormat = Exclude<ExportFormat, 'svg' | 'lottie'>;
 
 const FORMATS: { id: ExportFormat; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'gif', label: 'GIF', icon: Image, desc: 'Web y chats' },
   { id: 'webm', label: 'WebM', icon: Film, desc: 'Alfa transparente' },
   { id: 'mp4', label: 'MP4', icon: Film, desc: 'Universal' },
   { id: 'svg', label: 'SVG', icon: FileCode, desc: 'Vector animado' },
+  { id: 'lottie', label: 'Lottie', icon: FileJs, desc: 'JSON para web y apps' },
 ];
+
+// Versions of the Lottie file
+const LOTTIE_OPTIONS: { value: boolean; label: string; description: string }[] = [
+  {
+    value: false,
+    label: 'Normal',
+    description: 'Máxima fidelidad: todos los fotogramas clave, tres decimales y los nombres de las formas',
+  },
+  {
+    value: true,
+    label: 'Optimizado',
+    description: 'Archivo más pequeño para web y apps: menos decimales, sin fotogramas clave que no cambian el movimiento y sin nombres de formas',
+  },
+];
+
+// Antialiasing of GIF and video: frames rendered larger and scaled down
+const ANTIALIAS_OPTIONS = ANTIALIAS_LEVELS.map((level) => ({
+  value: level as number,
+  label: level === 1 ? 'Desactivado' : level === DEFAULT_ANTIALIAS ? '{level}x (recomendado)' : '{level}x (máxima calidad)',
+}));
 
 // How boolean groups whose shapes move against each other are written in the SVG
 const SVG_BOOLEAN_OPTIONS: { value: SvgBooleanMode; label: string; description: string }[] = [
@@ -72,6 +106,7 @@ interface RenderResult {
   height: number;
   fps: number;
   motionBlur: number; // shutter used (0 = off)
+  antialias: number; // supersampling factor used (1 = off)
   // Signature of the project it was made from, to warn when the project has changed since
   signature: string;
 }
@@ -110,6 +145,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
   // Motion blur (MP4 / WebM only): on / off and shutter intensity in %
   const [motionBlurOn, setMotionBlurOn] = useState<boolean>(false);
   const [motionBlurIntensity, setMotionBlurIntensity] = useState<number>(50);
+  // Antialiasing (GIF / video) and Lottie version
+  const [antialias, setAntialias] = useState<number>(DEFAULT_ANTIALIAS);
+  const [lottieOptimized, setLottieOptimized] = useState<boolean>(false);
+  // The Lottie warnings (and names inside the file) are in the interface language
+  const language = useLanguage();
 
   // Sync with project on open
   useEffect(() => {
@@ -149,6 +189,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
     const svg = exportToAnimatedSvg(project, { transparent, backgroundColor, fps, booleanMode });
     return new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
   }, [isOpen, format, project, transparent, backgroundColor, fps, booleanMode, waitingForEngine]);
+
+  // Lottie too: both versions are generated to compare their sizes
+  const lottie = useMemo(() => {
+    if (!isOpen || format !== 'lottie' || waitingForEngine) return null;
+    const make = (optimized: boolean) => {
+      const { json, warnings } = exportToLottie(project, { fps, transparent, backgroundColor, optimized });
+      return { blob: new Blob([json], { type: 'application/json' }), warnings };
+    };
+    return { normal: make(false), optimized: make(true) };
+  }, [isOpen, format, project, transparent, backgroundColor, fps, waitingForEngine, language]);
   const [svgUrl, setSvgUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!svgPreview) {
@@ -163,7 +213,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
   if (!isOpen) return null;
 
   const isSvg = format === 'svg';
-  const raster = isSvg ? null : (format as RasterFormat);
+  const isLottie = format === 'lottie';
+  // Generated live, without a render step
+  const isLive = isSvg || isLottie;
+  const raster = isLive ? null : (format as RasterFormat);
+  const lottieFile = lottie ? (lottieOptimized ? lottie.optimized : lottie.normal) : null;
   const render = raster ? renders[raster] : undefined;
   const error = raster ? errors[raster] : undefined;
   const isVideo = format === 'mp4' || format === 'webm';
@@ -177,7 +231,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
     setExporting({ format: target, progress: null });
     setErrors((prev) => ({ ...prev, [target]: undefined }));
 
-    const settings: ExportSettings = { format: target, fps, scale, transparent, backgroundColor, loop, motionBlur };
+    const settings: ExportSettings = { format: target, fps, scale, transparent, backgroundColor, loop, motionBlur, antialias };
     try {
       const { blob, filename } = await exportProject(project, settings, (progress) =>
         setExporting({ format: target, progress })
@@ -190,6 +244,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
         height: Math.round(project.height * scale),
         fps,
         motionBlur,
+        antialias: getAntialiasFactor(Math.round(project.width * scale), Math.round(project.height * scale), antialias),
         signature: projectSignature(project),
       };
       setRenders((prev) => {
@@ -198,7 +253,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
       });
     } catch (err: any) {
       console.error('Export error:', err);
-      setErrors((prev) => ({ ...prev, [target]: err?.message || 'Error durante la exportación del archivo.' }));
+      setErrors((prev) => ({ ...prev, [target]: err?.message || t('Error durante la exportación del archivo.') }));
     } finally {
       setExporting(null);
     }
@@ -210,9 +265,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
     setRenders((prev) => ({ ...prev, [raster]: undefined }));
   };
 
+  const lottieFilename = `${baseName}${lottieOptimized ? '.min' : ''}.json`;
+
   const handleDownload = () => {
     if (isSvg) {
       if (svgUrl) downloadUrl(svgUrl, `${baseName}.svg`);
+    } else if (isLottie) {
+      if (!lottieFile) return;
+      const url = URL.createObjectURL(lottieFile.blob);
+      downloadUrl(url, lottieFilename);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } else if (render) {
       downloadUrl(render.url, render.filename);
     }
@@ -225,13 +287,88 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
 
   // ── Right column: preview of the SVG or of the render ─────────────────────
   const renderPreview = () => {
+    if (isLottie) {
+      return (
+        <>
+          <div className="flex items-center justify-between gap-2 text-[11px]">
+            <span className="flex items-center gap-1.5 text-foreground font-semibold">
+              <FileJs className="w-3.5 h-3.5 text-bento-blue" />
+              {t('Archivo Lottie')}
+            </span>
+            {lottieFile && <span className="font-mono text-muted-foreground">{formatSize(lottieFile.blob.size)}</span>}
+          </div>
+          <PreviewStage transparent={false} empty>
+            {waitingForEngine || !lottie ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="w-3.5 h-3.5 text-bento-blue animate-spin" />
+                <span>{t('Preparando las operaciones booleanas…')}</span>
+              </div>
+            ) : (
+              <div className="w-full max-w-sm space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  {LOTTIE_OPTIONS.map((option) => {
+                    const file = option.value ? lottie.optimized : lottie.normal;
+                    const selected = option.value === lottieOptimized;
+                    return (
+                      <button
+                        key={option.label}
+                        type="button"
+                        onClick={() => setLottieOptimized(option.value)}
+                        className={`flex flex-col items-start justify-start p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          selected
+                            ? 'bg-bento-blue/15 border-bento-blue text-foreground'
+                            : 'bg-card border-border text-muted-foreground hover:text-foreground'
+                        }`}
+                        aria-pressed={selected}
+                      >
+                        <span className="flex items-center gap-1.5 font-semibold text-foreground">
+                          {option.value ? (
+                            <Lightning className="w-3.5 h-3.5 text-bento-blue" />
+                          ) : (
+                            <FileJs className="w-3.5 h-3.5 text-bento-blue" />
+                          )}
+                          {t(option.label)}
+                        </span>
+                        <span className="block font-mono text-lg text-foreground mt-1">{formatSize(file.blob.size)}</span>
+                        <span className="block text-[10px] text-muted-foreground leading-snug mt-1">{t(option.description)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {lottie.normal.blob.size > 0 && (
+                  <p className="text-[11px] text-muted-foreground text-center">
+                    {t('La versión optimizada pesa un {percent}% menos.', {
+                      percent: Math.max(0, Math.round((1 - lottie.optimized.blob.size / lottie.normal.blob.size) * 100)),
+                    })}
+                  </p>
+                )}
+                {lottieFile && lottieFile.warnings.length > 0 && (
+                  <div className="bg-bento-orange/10 border border-bento-orange/30 rounded-lg p-2.5 space-y-1">
+                    {lottieFile.warnings.map((warning) => (
+                      <p key={warning} className="text-[11px] text-foreground flex items-start gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px text-bento-orange" />
+                        <span>{warning}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </PreviewStage>
+          <p className="text-[11px] text-muted-foreground">
+            {t('Lottie es un JSON vectorial que se reproduce en sitios web y apps (lottie-web, iOS, Android, LottieFiles). No necesita renderizarse.')}
+          </p>
+        </>
+      );
+    }
+
     if (isSvg) {
       return (
         <>
           <div className="flex items-center justify-between gap-2 text-[11px]">
             <span className="flex items-center gap-1.5 text-foreground font-semibold">
               <Eye className="w-3.5 h-3.5 text-bento-blue" />
-              Vista previa en vivo
+              {t('Vista previa en vivo')}
             </span>
             {svgPreview && <span className="font-mono text-muted-foreground">{formatSize(svgPreview.size)}</span>}
           </div>
@@ -239,14 +376,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
             {waitingForEngine ? (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="w-3.5 h-3.5 text-bento-blue animate-spin" />
-                <span>Preparando las operaciones booleanas…</span>
+                <span>{t('Preparando las operaciones booleanas…')}</span>
               </div>
             ) : (
-              svgUrl && <img src={svgUrl} alt="Vista previa del SVG" className="max-w-full max-h-full object-contain" />
+              svgUrl && <img src={svgUrl} alt={t('Vista previa del SVG')} className="max-w-full max-h-full object-contain" />
             )}
           </PreviewStage>
           <p className="text-[11px] text-muted-foreground">
-            El SVG es vectorial y se anima sin JavaScript: no necesita renderizarse y se ve igual a cualquier tamaño.
+            {t('El SVG es vectorial y se anima sin JavaScript: no necesita renderizarse y se ve igual a cualquier tamaño.')}
           </p>
         </>
       );
@@ -260,8 +397,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
             <span className="flex items-center gap-1.5 text-foreground font-semibold min-w-0">
               <Eye className="w-3.5 h-3.5 text-bento-blue shrink-0" />
               <span className="truncate">
-                Render {formatLabel} · {render.width} × {render.height} · {render.fps} FPS
-                {render.motionBlur > 0 && ` · Desenfoque ${Math.round(render.motionBlur * 100)}%`}
+                {t('Render {format}', { format: formatLabel })} · {render.width} × {render.height} · {render.fps} FPS
+                {render.antialias > 1 && ` · AA ${render.antialias}x`}
+                {render.motionBlur > 0 && ` · ${t('Desenfoque {percent}%', { percent: Math.round(render.motionBlur * 100) })}`}
               </span>
             </span>
             <span className="flex items-center gap-2 shrink-0">
@@ -269,8 +407,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
               <button
                 onClick={handleDeleteRender}
                 className="p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-                data-tooltip="Borrar este render para repetirlo"
-                aria-label="Borrar render"
+                data-tooltip={t('Borrar este render para repetirlo')}
+                aria-label={t('Borrar render')}
               >
                 <Trash className="w-3.5 h-3.5" />
               </button>
@@ -278,7 +416,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
           </div>
           <PreviewStage transparent={transparent}>
             {format === 'gif' ? (
-              <img src={render.url} alt="Vista previa del GIF" className="max-w-full max-h-full object-contain" />
+              <img src={render.url} alt={t('Vista previa del GIF')} className="max-w-full max-h-full object-contain" />
             ) : (
               <video src={render.url} autoPlay loop muted controls className="max-w-full max-h-full object-contain" />
             )}
@@ -286,7 +424,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
           {outdated && (
             <p className="text-[11px] text-bento-orange flex items-center gap-1.5">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-              El proyecto cambió desde este render. Bórralo para generar uno nuevo.
+              {t('El proyecto cambió desde este render. Bórralo para generar uno nuevo.')}
             </p>
           )}
         </>
@@ -300,7 +438,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
             <div className="flex items-center justify-between text-xs">
               <div className="flex items-center gap-2 text-foreground">
                 <Loader2 className="w-3.5 h-3.5 text-bento-blue animate-spin" />
-                <span>{exporting?.progress?.stage || 'Preparando renderizado...'}</span>
+                <span>{exporting?.progress?.stage || t('Preparando renderizado...')}</span>
               </div>
               <span className="font-mono text-bento-blue font-semibold">{exporting?.progress?.percentage || 0}%</span>
             </div>
@@ -319,8 +457,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
         ) : (
           <div className="text-center text-muted-foreground max-w-xs">
             <Sparkles className="w-7 h-7 mx-auto mb-2 text-bento-blue/70" />
-            <p className="text-foreground font-semibold">Todavía no hay render en {formatLabel}</p>
-            <p className="text-[11px] mt-1">Pulsa Renderizar para generarlo y verlo aquí antes de descargarlo.</p>
+            <p className="text-foreground font-semibold">{t('Todavía no hay render en {format}', { format: formatLabel })}</p>
+            <p className="text-[11px] mt-1">{t('Pulsa Renderizar para generarlo y verlo aquí antes de descargarlo.')}</p>
           </div>
         )}
       </PreviewStage>
@@ -329,33 +467,34 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 backdrop-blur-[2px] p-4 select-none animate-fade-in">
-      <div className="bg-card border border-border rounded-2xl shadow-card-hover w-full max-w-4xl flex flex-col text-foreground animate-scale-in">
+      {/* Never taller than the window (minus its margins): the settings and preview scroll instead */}
+      <div className="bg-card border border-border rounded-2xl shadow-card-hover w-full max-w-4xl max-h-full flex flex-col text-foreground animate-scale-in">
         {/* Header */}
         <div className="px-5 py-4 border-b border-border flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <Download className="w-4 h-4 text-bento-blue" />
-            <h2 className="text-sm font-bold text-foreground font-heading">Exportar Animación</h2>
+            <h2 className="text-sm font-bold text-foreground font-heading">{t('Exportar Animación')}</h2>
           </div>
           <button
             onClick={onClose}
             className="p-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            aria-label="Cerrar"
+            aria-label={t('Cerrar')}
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content: settings on the left, preview on the right */}
-        <div className="p-5 grid grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)] gap-5 text-xs">
+        <div className="p-5 grid grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)] gap-5 text-xs flex-1 min-h-0 overflow-y-auto">
           <div className="space-y-4">
             {/* Format cards, two per row */}
             <div>
-              <label className="text-muted-foreground font-medium block mb-2">Formato de exportación</label>
+              <label className="text-muted-foreground font-medium block mb-2">{t('Formato de exportación')}</label>
               <div className="grid grid-cols-2 gap-2">
                 {FORMATS.map((item) => {
                   const Icon = item.icon;
                   const isSelected = format === item.id;
-                  const hasRender = item.id !== 'svg' && !!renders[item.id as RasterFormat];
+                  const hasRender = item.id !== 'svg' && item.id !== 'lottie' && !!renders[item.id as RasterFormat];
                   return (
                     <button
                       key={item.id}
@@ -369,7 +508,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                       {hasRender && (
                         <span
                           className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-bento-green"
-                          data-tooltip="Ya tiene un render"
+                          data-tooltip={t('Ya tiene un render')}
                         />
                       )}
                       {exporting?.format === item.id && (
@@ -377,7 +516,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                       )}
                       <Icon className={`w-4 h-4 mx-auto mb-1 ${isSelected ? 'text-bento-blue' : ''}`} />
                       <span className="font-semibold block text-xs">{item.label}</span>
-                      <span className="text-[9px] text-muted-foreground block truncate">{item.desc}</span>
+                      <span className="text-[9px] text-muted-foreground block truncate">{t(item.desc)}</span>
                     </button>
                   );
                 })}
@@ -387,7 +526,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
             {/* Resolution and FPS, each on its own line */}
             <div className="bg-secondary border border-border rounded-xl p-3 space-y-3">
               <div>
-                <label className="text-muted-foreground block mb-1">Resolución</label>
+                <label className="text-muted-foreground block mb-1">{t('Resolución')}</label>
                 <Dropdown
                   value={scale}
                   options={SCALES.map((s) => ({
@@ -400,22 +539,22 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                   align="left"
                   className="w-full bg-card! font-mono"
                   menuClassName="w-full"
-                  disabled={isSvg}
-                  title={isSvg ? 'El SVG es vectorial: no depende de la resolución' : undefined}
-                  ariaLabel="Resolución"
+                  disabled={isLive}
+                  title={isLive ? t('Los formatos vectoriales no dependen de la resolución') : undefined}
+                  ariaLabel={t('Resolución')}
                 />
               </div>
 
               <div>
-                <label className="text-muted-foreground block mb-1">Velocidad (FPS)</label>
+                <label className="text-muted-foreground block mb-1">{t('Velocidad (FPS)')}</label>
                 <Dropdown
                   value={fps}
-                  options={FPS_OPTIONS}
+                  options={FPS_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))}
                   onChange={setFps}
                   align="left"
                   className="w-full bg-card! font-mono"
                   menuClassName="w-full"
-                  ariaLabel="Velocidad (FPS)"
+                  ariaLabel={t('Velocidad (FPS)')}
                 />
               </div>
 
@@ -424,22 +563,55 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                 <div className="pt-3 border-t border-border space-y-1">
                   <label className="text-muted-foreground flex items-center gap-1.5">
                     <UniteSquare className="w-3.5 h-3.5 text-bento-blue" />
-                    <span>Grupos booleanos animados</span>
+                    <span>{t('Grupos booleanos animados')}</span>
                   </label>
                   <Dropdown
                     value={booleanMode}
-                    options={SVG_BOOLEAN_OPTIONS}
+                    options={SVG_BOOLEAN_OPTIONS.map((o) => ({ ...o, label: t(o.label), description: t(o.description) }))}
                     onChange={setBooleanMode}
                     align="left"
                     className="w-full bg-card!"
                     menuClassName="w-72"
                     optionClassName=""
-                    ariaLabel="Grupos booleanos animados"
+                    ariaLabel={t('Grupos booleanos animados')}
                   />
                   <p className="text-[10px] text-muted-foreground leading-snug">
-                    {SVG_BOOLEAN_OPTIONS.find((o) => o.value === booleanMode)?.description}. Los grupos cuyas formas no
-                    se mueven entre sí siempre se exportan como un solo trazado.
+                    {t(SVG_BOOLEAN_OPTIONS.find((o) => o.value === booleanMode)?.description ?? '')}.{' '}
+                    {t('Los grupos cuyas formas no se mueven entre sí siempre se exportan como un solo trazado.')}
                   </p>
+                </div>
+              )}
+
+              {/* Antialiasing (GIF and video) */}
+              {!isLive && (
+                <div className="pt-3 border-t border-border space-y-1">
+                  <label className="text-muted-foreground block">{t('Antialiasing')}</label>
+                  <Dropdown
+                    value={antialias}
+                    options={ANTIALIAS_OPTIONS.map((o) => ({ ...o, label: t(o.label, { level: o.value }) }))}
+                    onChange={setAntialias}
+                    align="left"
+                    className="w-full bg-card!"
+                    menuClassName="w-full"
+                    optionClassName=""
+                    ariaLabel={t('Antialiasing')}
+                  />
+                  <p className="text-[10px] text-muted-foreground leading-snug">
+                    {antialias > 1
+                      ? t('Suaviza los bordes: cada fotograma se dibuja {level} veces más grande y se reduce, así que el render tarda más.', { level: antialias })
+                      : t('Los bordes se dibujan sin suavizado extra: es lo más rápido, pero pueden verse dentados.')}
+                    {antialias > 1 &&
+                      getAntialiasFactor(exportWidth, exportHeight, antialias) < antialias &&
+                      ` ${t('A esta resolución se usa {level}x.', { level: getAntialiasFactor(exportWidth, exportHeight, antialias) })}`}
+                  </p>
+                  {format === 'gif' && transparent && (
+                    <p className="text-[10px] text-bento-orange leading-snug flex items-start gap-1">
+                      <Info className="w-3 h-3 shrink-0 mt-px" />
+                      <span>
+                        {t('Un GIF transparente solo tiene píxeles opacos o transparentes: el borde contra el fondo no puede suavizarse. Para bordes suaves, usa un color de fondo o WebM.')}
+                      </span>
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -456,13 +628,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                     />
                     <label htmlFor="motion-blur-chk" className="text-foreground font-medium cursor-pointer flex items-center gap-1.5">
                       <Wind className="w-3.5 h-3.5 text-bento-blue" />
-                      <span>Desenfoque de movimiento</span>
+                      <span>{t('Desenfoque de movimiento')}</span>
                     </label>
                   </div>
                   {motionBlurOn && (
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <label htmlFor="motion-blur-range" className="text-muted-foreground">Intensidad</label>
+                        <label htmlFor="motion-blur-range" className="text-muted-foreground">{t('Intensidad')}</label>
                         <span className="font-mono text-foreground">
                           {motionBlurIntensity}% · {Math.round(motionBlurIntensity * 3.6)}°
                         </span>
@@ -476,11 +648,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                         value={motionBlurIntensity}
                         onChange={(e) => setMotionBlurIntensity(Number(e.target.value))}
                         className="w-full accent-bento-blue h-1 bg-muted rounded-md cursor-pointer"
-                        aria-label="Intensidad del desenfoque de movimiento"
+                        aria-label={t('Intensidad del desenfoque de movimiento')}
                       />
                       <p className="text-[10px] text-muted-foreground leading-snug">
-                        Parte de cada fotograma en que el obturador queda abierto (100% = 360°). Se mezclan{' '}
-                        {motionBlurSamples(motionBlurIntensity / 100)} instantes por fotograma, así que el render tarda más.
+                        {t('Parte de cada fotograma en que el obturador queda abierto (100% = 360°). Se mezclan {samples} instantes por fotograma, así que el render tarda más.', {
+                          samples: motionBlurSamples(motionBlurIntensity / 100),
+                        })}
                       </p>
                     </div>
                   )}
@@ -499,20 +672,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                   />
                   <label htmlFor="transparent-chk" className="text-foreground font-medium cursor-pointer flex items-center gap-1.5">
                     <Grid className="w-3.5 h-3.5 text-bento-blue" />
-                    <span>Fondo transparente (canal alfa)</span>
+                    <span>{t('Fondo transparente (canal alfa)')}</span>
                   </label>
                 </div>
 
                 {!transparent && (
                   <div>
-                    <label className="text-muted-foreground block mb-1">Color de fondo</label>
+                    <label className="text-muted-foreground block mb-1">{t('Color de fondo')}</label>
                     <div className="flex items-center gap-2">
-                      <ColorSwatch value={backgroundColor} onChange={setBackgroundColor} title="Color de fondo" className="w-8 h-8 rounded-lg!" />
+                      <ColorSwatch value={backgroundColor} onChange={setBackgroundColor} title={t('Color de fondo')} className="w-8 h-8 rounded-lg!" />
                       <HexColorInput
                         value={backgroundColor}
                         onChange={setBackgroundColor}
                         className="flex-1 min-w-0 bg-card border border-border rounded-lg px-2 h-8 font-mono text-foreground"
-                        ariaLabel="Color de fondo"
+                        ariaLabel={t('Color de fondo')}
                       />
                     </div>
                   </div>
@@ -528,7 +701,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
         {/* Footer Actions */}
         <div className="px-5 py-3 border-t border-border bg-secondary/40 rounded-b-2xl flex items-center justify-between gap-3 shrink-0">
           <div className="text-[11px] text-muted-foreground font-mono truncate">
-            {isSvg ? `SVG · ${project.width} × ${project.height} (vectorial)` : `${formatLabel} · ${exportWidth} × ${exportHeight} px`}
+            {isLive
+              ? `${formatLabel} · ${project.width} × ${project.height} (${t('vectorial')})`
+              : `${formatLabel} · ${exportWidth} × ${exportHeight} px`}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -536,17 +711,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
               onClick={onClose}
               className="px-4 py-2 text-xs font-semibold rounded-xl bg-secondary hover:bg-accent border border-border text-foreground transition-colors cursor-pointer"
             >
-              Cerrar
+              {t('Cerrar')}
             </button>
 
-            {isSvg || render ? (
+            {isLive || render ? (
               <button
                 onClick={handleDownload}
-                disabled={isSvg && !svgUrl}
+                disabled={(isSvg && !svgUrl) || (isLottie && !lottieFile)}
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-bento-green hover:bg-bento-green/90 active:bg-bento-green/80 disabled:opacity-50 text-white transition-colors cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Descargar {isSvg ? `${baseName}.svg` : render!.filename}</span>
+                <span>
+                  {t('Descargar {filename}', { filename: isSvg ? `${baseName}.svg` : isLottie ? lottieFilename : render!.filename })}
+                </span>
               </button>
             ) : (
               <button
@@ -557,12 +734,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                 {exporting ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Renderizando {renderingLabel}...</span>
+                    <span>{t('Renderizando {format}...', { format: renderingLabel ?? '' })}</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Renderizar</span>
+                    <span>{t('Renderizar')}</span>
                   </>
                 )}
               </button>

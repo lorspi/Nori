@@ -18,6 +18,7 @@ import {
   Newspaper,
 } from '@phosphor-icons/react';
 import changelog from '../../CHANGELOG.md?raw';
+import { t } from '../i18n';
 
 // Simple markdown renderer for changelog (handles headers, lists, bold)
 function ChangelogRenderer({ content }: { content: string }) {
@@ -73,8 +74,8 @@ export default function AboutNori() {
   ];
 
   const tabs = [
-    { id: 'about' as const, label: 'Acerca de', icon: Info },
-    { id: 'changelog' as const, label: 'Changelog', icon: Newspaper },
+    { id: 'about' as const, label: t('Acerca de'), icon: Info },
+    { id: 'changelog' as const, label: t('Changelog'), icon: Newspaper },
   ];
 
   return (
@@ -111,7 +112,7 @@ export default function AboutNori() {
                 <img src="/icon.svg" alt="Nori" className="w-16 h-16 mx-auto" />
                 <div>
                   <h1 className="text-2xl font-bold text-foreground font-heading">Nori</h1>
-                  <p className="text-xs text-muted-foreground font-mono mt-1">versión {version}</p>
+                  <p className="text-xs text-muted-foreground font-mono mt-1">{t('versión {version}', { version })}</p>
                 </div>
                 {updateAvailable && (
                   <a
@@ -121,12 +122,12 @@ export default function AboutNori() {
                     className="inline-flex items-center gap-1.5 bg-bento-blue-light text-bento-blue border border-bento-blue/30 px-3 py-1.5 rounded-xl text-xs font-semibold hover:opacity-80 transition-opacity cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    Nueva versión disponible (v{remoteVersion})
+                    {t('Nueva versión disponible (v{version})', { version: remoteVersion ?? '' })}
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
                 <p className="text-sm text-muted-foreground max-w-md mx-auto leading-relaxed">
-                  El lugar donde las ideas cobran movimiento. Animación vectorial y motion design en el navegador, sin servidores externos ni suscripciones.
+                  {t('El lugar donde las ideas cobran movimiento. Animación vectorial y motion design en el navegador, sin servidores externos ni suscripciones.')}
                 </p>
               </div>
 
@@ -134,28 +135,28 @@ export default function AboutNori() {
               <section className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-card">
                 <h2 className="text-sm font-bold text-foreground font-heading flex items-center gap-2">
                   <Heart className="w-4 h-4 text-bento-orange" />
-                  Filosofía
+                  {t('Filosofía')}
                 </h2>
                 <ul className="space-y-1.5 text-xs text-muted-foreground">
                   <li className="flex items-start gap-2">
                     <span className="text-bento-blue mt-0.5">•</span>
-                    Las animaciones y los archivos pertenecen a quienes los crean.
+                    {t('Las animaciones y los archivos pertenecen a quienes los crean.')}
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-bento-blue mt-0.5">•</span>
-                    No depende de servidores externos ni de suscripciones para existir.
+                    {t('No depende de servidores externos ni de suscripciones para existir.')}
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-bento-blue mt-0.5">•</span>
-                    La simplicidad es una característica, no una limitación.
+                    {t('La simplicidad es una característica, no una limitación.')}
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-bento-blue mt-0.5">•</span>
-                    Los proyectos se guardan en formatos abiertos y legibles (JSON, Lottie, SVG).
+                    {t('Los proyectos se guardan en formatos abiertos y legibles (JSON, Lottie, SVG).')}
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-bento-blue mt-0.5">•</span>
-                    Cada nueva funcionalidad debe justificar su existencia.
+                    {t('Cada nueva funcionalidad debe justificar su existencia.')}
                   </li>
                 </ul>
               </section>
@@ -164,25 +165,25 @@ export default function AboutNori() {
               <section className="bg-card border border-border rounded-2xl p-5 space-y-4 shadow-card">
                 <h2 className="text-sm font-bold text-foreground font-heading flex items-center gap-2">
                   <Info className="w-4 h-4 text-bento-blue" />
-                  Información
+                  {t('Información')}
                 </h2>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="bg-secondary rounded-xl p-3 border border-border">
-                    <span className="text-muted-foreground block mb-0.5 font-semibold">Autor</span>
+                    <span className="text-muted-foreground block mb-0.5 font-semibold">{t('Autor')}</span>
                     <span className="text-foreground font-bold">Juan Pablo Pérez</span>
                   </div>
                   <div className="bg-secondary rounded-xl p-3 border border-border">
-                    <span className="text-muted-foreground block mb-0.5 font-semibold">Licencia</span>
+                    <span className="text-muted-foreground block mb-0.5 font-semibold">{t('Licencia')}</span>
                     <span className="text-foreground font-bold">Apache 2.0</span>
                   </div>
                   <div className="bg-secondary rounded-xl p-3 border border-border">
-                    <span className="text-muted-foreground block mb-0.5 font-semibold">Versión</span>
+                    <span className="text-muted-foreground block mb-0.5 font-semibold">{t('Versión')}</span>
                     <span className="text-foreground font-mono font-bold">{version}</span>
                   </div>
                   <div className="bg-secondary rounded-xl p-3 border border-border">
-                    <span className="text-muted-foreground block mb-0.5 font-semibold">Plataforma</span>
-                    <span className="text-foreground font-bold">Web (Offline-first)</span>
+                    <span className="text-muted-foreground block mb-0.5 font-semibold">{t('Plataforma')}</span>
+                    <span className="text-foreground font-bold">{t('Web (Offline-first)')}</span>
                   </div>
                 </div>
               </section>
@@ -191,7 +192,7 @@ export default function AboutNori() {
               <section className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-card">
                 <h2 className="text-sm font-bold text-foreground font-heading flex items-center gap-2">
                   <Code2 className="w-4 h-4 text-bento-blue" />
-                  Stack Tecnológico
+                  {t('Stack Tecnológico')}
                 </h2>
                 <div className="flex flex-wrap gap-2">
                   {techStack.map(tech => (
@@ -209,7 +210,7 @@ export default function AboutNori() {
               <section className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-card">
                 <h2 className="text-sm font-bold text-foreground font-heading flex items-center gap-2">
                   <Globe className="w-4 h-4 text-bento-green" />
-                  Enlaces
+                  {t('Enlaces')}
                 </h2>
 
                 <div className="flex flex-col gap-2">
@@ -220,7 +221,7 @@ export default function AboutNori() {
                     className="flex items-center gap-2.5 bg-secondary hover:bg-accent border border-border rounded-xl px-4 py-2.5 text-xs font-semibold text-foreground transition-colors"
                   >
                     <Github className="w-4 h-4 text-muted-foreground" />
-                    Repositorio en GitHub
+                    {t('Repositorio en GitHub')}
                   </a>
 
                   <a
@@ -230,7 +231,7 @@ export default function AboutNori() {
                     className="flex items-center gap-2.5 bg-secondary hover:bg-accent border border-border rounded-xl px-4 py-2.5 text-xs font-semibold text-foreground transition-colors"
                   >
                     <Coffee className="w-4 h-4 text-bento-orange" />
-                    Apoya al creador en Ko-fi
+                    {t('Apoya al creador en Ko-fi')}
                   </a>
                 </div>
               </section>
@@ -239,16 +240,16 @@ export default function AboutNori() {
               <section className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-card">
                 <h2 className="text-sm font-bold text-foreground font-heading flex items-center gap-2">
                   <Scale className="w-4 h-4 text-muted-foreground" />
-                  Licencia
+                  {t('Licencia')}
                 </h2>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Nori se distribuye bajo la Licencia Apache 2.0. Puedes usar, modificar y distribuir este software libremente siempre que se mantenga la atribución original y la nota de licencia. Esta licencia no proporciona garantía alguna sobre el software.
+                  {t('Nori se distribuye bajo la Licencia Apache 2.0. Puedes usar, modificar y distribuir este software libremente siempre que se mantenga la atribución original y la nota de licencia. Esta licencia no proporciona garantía alguna sobre el software.')}
                 </p>
               </section>
 
               {/* Footer */}
               <p className="text-center text-[10px] text-muted-foreground pb-4">
-                Hecho con cariño por lorspi · {new Date().getFullYear()}
+                {t('Hecho con cariño por lorspi · {year}', { year: new Date().getFullYear() })}
               </p>
             </div>
           )}
@@ -259,7 +260,7 @@ export default function AboutNori() {
               <div className="bg-card border border-border rounded-2xl p-5 shadow-card">
                 <h2 className="text-sm font-bold text-foreground font-heading flex items-center gap-2 mb-4">
                   <Newspaper className="w-4 h-4 text-bento-blue" />
-                  Historial de Cambios
+                  {t('Historial de Cambios')}
                 </h2>
                 <ChangelogRenderer content={changelog} />
               </div>

@@ -3,9 +3,9 @@ import { getLayerPropertiesAtTime } from './interpolator';
 import { createKeyframe, createTrack } from './animationTracks';
 
 /**
- * Layer hierarchy. Only boolean groups have children: a layer whose parentId points to a
- * 'boolean' layer lives in that group's coordinate space. project.layers keeps every group
- * right before its children (pre-order), back to front among siblings.
+ * Layer hierarchy. Groups ('group') and boolean groups ('boolean') have children: a layer whose
+ * parentId points to one of them lives in that group's coordinate space. project.layers keeps
+ * every group right before its children (pre-order), back to front among siblings.
  */
 
 // 2D affine matrix as in canvas / SVG: x' = a·x + c·y + e, y' = b·x + d·y + f
@@ -69,6 +69,12 @@ export function layerMatrix(
 // ── Tree ──────────────────────────────────────────────────────────────────────
 
 export const isBooleanLayer = (layer: Layer | null | undefined) => layer?.type === 'boolean';
+
+// Plain group: its children are drawn one by one, each with its own style and animation
+export const isGroupLayer = (layer: Layer | null | undefined) => layer?.type === 'group';
+
+// Layers that hold other layers
+export const isContainerLayer = (layer: Layer | null | undefined) => layer?.type === 'boolean' || layer?.type === 'group';
 
 export const getLayer = (layers: Layer[], id: string | null | undefined) =>
   id ? layers.find((l) => l.id === id) : undefined;
@@ -146,7 +152,7 @@ export const isLayerLocked = (layers: Layer[], layer: Layer) =>
   layer.locked || getAncestors(layers, layer).some((a) => a.locked);
 
 /**
- * Valid tree in stacking order: parentIds that don't point to a boolean group (or form a loop)
+ * Valid tree in stacking order: parentIds that don't point to a group (or form a loop)
  * are dropped, and each group is followed by its children. Siblings keep their relative order,
  * so a layer inserted between a group's children without a parent ends up after the group.
  * Returns the same array when nothing changes.
@@ -157,7 +163,7 @@ export function normalizeLayerTree(layers: Layer[]): Layer[] {
     if (!layer.parentId) return layer;
     const seen = new Set([layer.id]);
     let parent = byId.get(layer.parentId);
-    let valid = !!parent && parent.type === 'boolean';
+    let valid = isContainerLayer(parent);
     while (valid && parent?.parentId) {
       if (seen.has(parent.id)) {
         valid = false;
@@ -165,7 +171,7 @@ export function normalizeLayerTree(layers: Layer[]): Layer[] {
       }
       seen.add(parent.id);
       parent = byId.get(parent.parentId);
-      valid = !!parent && parent.type === 'boolean';
+      valid = isContainerLayer(parent);
     }
     if (valid) return layer;
     const { parentId: _dropped, ...rest } = layer;
@@ -177,7 +183,7 @@ export function normalizeLayerTree(layers: Layer[]): Layer[] {
     for (const layer of fixed) {
       if (layer.parentId !== parentId) continue;
       ordered.push(layer);
-      if (layer.type === 'boolean') emit(layer.id);
+      if (isContainerLayer(layer)) emit(layer.id);
     }
   };
   emit(undefined);

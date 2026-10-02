@@ -62,6 +62,8 @@ import {
 } from '../utils/projectFiles';
 import { NORI_INTRO_PROJECT } from '../utils/noriIntro';
 import ThemeToggle from './ThemeToggle';
+import LanguageSelector from './LanguageSelector';
+import { getLanguage, t } from '../i18n';
 import AboutNori from './AboutNori';
 import { ProjectThumbnail } from './ProjectThumbnail';
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
@@ -103,11 +105,11 @@ function formatRelative(timestamp: number): string {
   const mins = Math.floor(diffMs / 60000);
   const hours = Math.floor(diffMs / 3600000);
   const days = Math.floor(diffMs / 86400000);
-  if (mins < 1) return 'ahora mismo';
-  if (mins < 60) return `hace ${mins} min`;
-  if (hours < 24) return `hace ${hours} h`;
-  if (days < 7) return `hace ${days} d`;
-  return new Date(timestamp).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (mins < 1) return t('ahora mismo');
+  if (mins < 60) return t('hace {count} min', { count: mins });
+  if (hours < 24) return t('hace {count} h', { count: hours });
+  if (days < 7) return t('hace {count} d', { count: days });
+  return new Date(timestamp).toLocaleDateString(getLanguage() === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function formatSize(chars: number): string {
@@ -237,7 +239,7 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
       const { project, message } = await load();
       onCreateProject(project, message, false, targetFolderId);
     } catch (err: any) {
-      toast(err?.message || 'No se pudo importar el archivo', 'error');
+      toast(err?.message || t('No se pudo importar el archivo'), 'error');
     }
   };
 
@@ -249,26 +251,26 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
 
   const createItems: MenuButtonItem[] = [
     {
-      label: 'Proyecto en blanco',
-      description: 'Lienzo en blanco de 960 × 540',
+      label: t('Proyecto en blanco'),
+      description: t('Lienzo en blanco de 960 × 540'),
       Icon: FilePlus,
-      onSelect: () => onCreateProject(createBlankProject(), 'Nuevo proyecto en blanco creado', false, targetFolderId),
+      onSelect: () => onCreateProject(createBlankProject(), t('Nuevo proyecto en blanco creado'), false, targetFolderId),
     },
     {
-      label: 'Proyecto de ejemplo',
-      description: 'La animación del logo de Nori',
+      label: t('Proyecto de ejemplo'),
+      description: t('La animación del logo de Nori'),
       Icon: NoriLogo,
       onSelect: () =>
         onCreateProject(
           JSON.parse(JSON.stringify(NORI_INTRO_PROJECT)),
-          'Proyecto de ejemplo abierto',
+          t('Proyecto de ejemplo abierto'),
           true,
           targetFolderId
         ),
     },
     {
-      label: 'Carpeta',
-      description: 'Para agrupar proyectos; arrastra los proyectos sobre ella',
+      label: t('Carpeta'),
+      description: t('Para agrupar proyectos; arrastra los proyectos sobre ella'),
       Icon: FolderSimplePlus,
       separatorBefore: true,
       onSelect: () => handleCreateFolder(),
@@ -277,20 +279,20 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
 
   const importItems: MenuButtonItem[] = [
     {
-      label: 'Importar SVG',
-      description: 'Si es animado, sus animaciones pasan a la línea del tiempo',
+      label: t('Importar SVG'),
+      description: t('Si es animado, sus animaciones pasan a la línea del tiempo'),
       Icon: FileSvg,
       onSelect: () => svgInputRef.current?.click(),
     },
     {
-      label: 'Código SVG',
-      description: 'Pegar el código de un SVG',
+      label: t('Código SVG'),
+      description: t('Pegar el código de un SVG'),
       Icon: ClipboardText,
       onSelect: () => setIsPasteSvgOpen(true),
     },
     {
-      label: 'Importar desde Figma',
-      description: 'Un frame copiado como SVG',
+      label: t('Importar desde Figma'),
+      description: t('Un frame copiado como SVG'),
       Icon: FigmaLogo,
       onSelect: () => setIsFigmaImportOpen(true),
     },
@@ -302,61 +304,63 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
 
   const handleCreateFolder = async () => {
     const name = (await prompt({
-      title: 'Nueva carpeta',
-      placeholder: 'Nombre de la carpeta',
-      defaultValue: 'Nueva carpeta',
-      confirmLabel: 'Crear',
+      title: t('Nueva carpeta'),
+      placeholder: t('Nombre de la carpeta'),
+      defaultValue: t('Nueva carpeta'),
+      confirmLabel: t('Crear'),
     }))?.trim();
     if (!name) return;
     const folder = createFolder(name.slice(0, 60));
     if (!folder) {
-      toast('No se pudo crear la carpeta (espacio insuficiente en el navegador)', 'error');
+      toast(t('No se pudo crear la carpeta (espacio insuficiente en el navegador)'), 'error');
       return;
     }
     refresh();
-    toast(`Carpeta "${folder.name}" creada`, 'success');
+    toast(t('Carpeta "{name}" creada', { name: folder.name }), 'success');
   };
 
   const handleRenameFolder = async (folder: FolderMeta) => {
     const name = (await prompt({
-      title: 'Renombrar carpeta',
+      title: t('Renombrar carpeta'),
       defaultValue: folder.name,
-      confirmLabel: 'Renombrar',
+      confirmLabel: t('Renombrar'),
     }))?.trim();
     if (!name || name === folder.name) return;
     if (renameFolder(folder.id, name.slice(0, 60))) {
       refresh();
-      toast(`Carpeta renombrada a "${name}"`, 'success');
+      toast(t('Carpeta renombrada a "{name}"', { name }), 'success');
     } else {
-      toast('No se pudo renombrar la carpeta', 'error');
+      toast(t('No se pudo renombrar la carpeta'), 'error');
     }
   };
 
   const handleDeleteFolder = async (folder: FolderMeta) => {
     const count = folderCounts.get(folder.id) ?? 0;
     const ok = await confirm({
-      title: 'Eliminar carpeta',
+      title: t('Eliminar carpeta'),
       message:
-        count > 0
-          ? `¿Eliminar la carpeta "${folder.name}"? ${count === 1 ? 'El proyecto que contiene pasará' : `Los ${count} proyectos que contiene pasarán`} a la raíz de Inicio; no se borra ningún proyecto.`
-          : `¿Eliminar la carpeta "${folder.name}"? Está vacía.`,
-      confirmLabel: 'Eliminar carpeta',
+        count === 0
+          ? t('¿Eliminar la carpeta "{name}"? Está vacía.', { name: folder.name })
+          : count === 1
+            ? t('¿Eliminar la carpeta "{name}"? El proyecto que contiene pasará a la raíz de Inicio; no se borra ningún proyecto.', { name: folder.name })
+            : t('¿Eliminar la carpeta "{name}"? Los {count} proyectos que contiene pasarán a la raíz de Inicio; no se borra ningún proyecto.', { name: folder.name, count }),
+      confirmLabel: t('Eliminar carpeta'),
       variant: 'danger',
     });
     if (ok !== true) return;
     if (!deleteFolder(folder.id)) {
-      toast('No se pudo eliminar la carpeta', 'error');
+      toast(t('No se pudo eliminar la carpeta'), 'error');
       return;
     }
     refresh();
-    toast(`Carpeta "${folder.name}" eliminada`, 'success');
+    toast(t('Carpeta "{name}" eliminada', { name: folder.name }), 'success');
   };
 
   const buildFolderMenuItems = (folder: FolderMeta): ContextMenuItem[] => [
-    { label: 'Abrir', onSelect: () => openFolder(folder.id) },
-    { label: 'Renombrar…', onSelect: () => handleRenameFolder(folder) },
+    { label: t('Abrir'), onSelect: () => openFolder(folder.id) },
+    { label: t('Renombrar…'), onSelect: () => handleRenameFolder(folder) },
     'separator',
-    { label: 'Eliminar carpeta', danger: true, onSelect: () => handleDeleteFolder(folder) },
+    { label: t('Eliminar carpeta'), danger: true, onSelect: () => handleDeleteFolder(folder) },
   ];
 
   // ── Dragging projects into folders ──────────────────────────────────────────
@@ -369,12 +373,17 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     const nextFolder = target === ROOT_TARGET ? null : target;
     if (folderOf(meta) === nextFolder) return;
     if (!moveProjectToFolder(id, nextFolder)) {
-      toast('No se pudo mover el proyecto', 'error');
+      toast(t('No se pudo mover el proyecto'), 'error');
       return;
     }
     refresh();
     const folder = nextFolder ? folders.find((f) => f.id === nextFolder) : null;
-    toast(folder ? `"${meta.title}" se movió a "${folder.name}"` : `"${meta.title}" se movió a la raíz de Inicio`, 'success');
+    toast(
+      folder
+        ? t('"{title}" se movió a "{folder}"', { title: meta.title, folder: folder.name })
+        : t('"{title}" se movió a la raíz de Inicio', { title: meta.title }),
+      'success'
+    );
   };
 
   /** Props that turn an element into a place where a project card can be dropped */
@@ -430,21 +439,21 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
   const withProject = (meta: ProjectMeta, action: (project: Project) => void) => {
     const project = loadProject(meta.id);
     if (project) action(project);
-    else toast(`No se pudo leer el proyecto "${meta.title}"`, 'error');
+    else toast(t('No se pudo leer el proyecto "{title}"', { title: meta.title }), 'error');
   };
 
   const handleRename = async (meta: ProjectMeta) => {
     const title = await prompt({
-      title: 'Renombrar proyecto',
+      title: t('Renombrar proyecto'),
       defaultValue: meta.title,
-      confirmLabel: 'Renombrar',
+      confirmLabel: t('Renombrar'),
     });
     if (!title || title === meta.title) return;
     if (renameProject(meta.id, title.slice(0, 80))) {
       refresh();
-      toast(`Proyecto renombrado a "${title}"`, 'success');
+      toast(t('Proyecto renombrado a "{title}"', { title }), 'success');
     } else {
-      toast('No se pudo renombrar el proyecto', 'error');
+      toast(t('No se pudo renombrar el proyecto'), 'error');
     }
   };
 
@@ -452,66 +461,72 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     const copy = duplicateProject(meta.id);
     if (copy) {
       refresh();
-      toast(`Proyecto duplicado: "${copy.title}"`, 'success');
+      toast(t('Proyecto duplicado: "{title}"', { title: copy.title }), 'success');
     } else {
-      toast('No se pudo duplicar el proyecto (espacio insuficiente en el navegador)', 'error');
+      toast(t('No se pudo duplicar el proyecto (espacio insuficiente en el navegador)'), 'error');
     }
   };
 
   const handleTrash = (meta: ProjectMeta) => {
     if (!trashProject(meta.id)) return;
     refresh();
-    toast(`"${meta.title}" se movió a la papelera`, 'success');
+    toast(t('"{title}" se movió a la papelera', { title: meta.title }), 'success');
   };
 
   const buildMenuItems = (meta: ProjectMeta): ContextMenuItem[] => [
-    { label: 'Abrir', onSelect: () => onOpenProject(meta.id) },
-    { label: 'Exportar…', onSelect: () => withProject(meta, setExportTarget) },
+    { label: t('Abrir'), onSelect: () => onOpenProject(meta.id) },
+    { label: t('Exportar…'), onSelect: () => withProject(meta, setExportTarget) },
     {
-      label: 'Descargar JSON',
-      onSelect: () => withProject(meta, (p) => toast(`Proyecto descargado: ${downloadProjectJson(p)}`, 'success')),
+      label: t('Descargar JSON'),
+      onSelect: () =>
+        withProject(meta, (p) => toast(t('Proyecto descargado: {filename}', { filename: downloadProjectJson(p) }), 'success')),
     },
     'separator',
-    { label: 'Renombrar…', onSelect: () => handleRename(meta) },
-    { label: 'Duplicar', onSelect: () => handleDuplicate(meta) },
+    { label: t('Renombrar…'), onSelect: () => handleRename(meta) },
+    { label: t('Duplicar'), onSelect: () => handleDuplicate(meta) },
     ...(folderOf(meta)
-      ? [{ label: 'Sacar de la carpeta', onSelect: () => moveProject(meta.id, ROOT_TARGET) } as ContextMenuItem]
+      ? [{ label: t('Sacar de la carpeta'), onSelect: () => moveProject(meta.id, ROOT_TARGET) } as ContextMenuItem]
       : []),
     'separator',
-    { label: 'Borrar', danger: true, onSelect: () => handleTrash(meta) },
+    { label: t('Borrar'), danger: true, onSelect: () => handleTrash(meta) },
   ];
 
   // ── Trash ───────────────────────────────────────────────────────────────────
   const handleRestore = (meta: ProjectMeta) => {
     if (!restoreProject(meta.id)) return;
     refresh();
-    toast(`"${meta.title}" se restauró`, 'success');
+    toast(t('"{title}" se restauró', { title: meta.title }), 'success');
   };
 
   const handleDeleteForever = async (meta: ProjectMeta) => {
     const ok = await confirm({
-      title: 'Eliminar permanentemente',
-      message: `¿Eliminar "${meta.title}" de forma permanente? Esta acción no se puede deshacer.`,
-      confirmLabel: 'Eliminar',
+      title: t('Eliminar permanentemente'),
+      message: t('¿Eliminar "{title}" de forma permanente? Esta acción no se puede deshacer.', { title: meta.title }),
+      confirmLabel: t('Eliminar'),
       variant: 'danger',
     });
     if (ok !== true) return;
     deleteProjectForever(meta.id);
     refresh();
-    toast('Proyecto eliminado permanentemente', 'success');
+    toast(t('Proyecto eliminado permanentemente'), 'success');
   };
 
   const handleEmptyTrash = async () => {
     const ok = await confirm({
-      title: 'Vaciar papelera',
-      message: `Se eliminarán permanentemente ${trashed.length === 1 ? 'el proyecto' : `los ${trashed.length} proyectos`} de la papelera. Esta acción no se puede deshacer.`,
-      confirmLabel: 'Vaciar papelera',
+      title: t('Vaciar papelera'),
+      message:
+        trashed.length === 1
+          ? t('Se eliminará permanentemente el proyecto de la papelera. Esta acción no se puede deshacer.')
+          : t('Se eliminarán permanentemente los {count} proyectos de la papelera. Esta acción no se puede deshacer.', {
+              count: trashed.length,
+            }),
+      confirmLabel: t('Vaciar papelera'),
       variant: 'danger',
     });
     if (ok !== true) return;
     emptyTrash();
     refresh();
-    toast('Papelera vaciada', 'success');
+    toast(t('Papelera vaciada'), 'success');
   };
 
   // ── Layout ──────────────────────────────────────────────────────────────────
@@ -558,16 +573,16 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
         <div className="p-4 border-b border-border flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 overflow-hidden">
             <img src="/icon.svg" alt="Nori" className="w-8 h-8 shrink-0" />
-            <div className="leading-tight overflow-hidden">
-              <span className="text-sm font-bold text-foreground block truncate font-heading">Nori</span>
-              <span className="text-[10px] text-muted-foreground block truncate font-mono">Animación vectorial</span>
-            </div>
+            <span className="text-sm font-bold text-foreground truncate font-heading">Nori</span>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-1.5 shrink-0">
+            <LanguageSelector />
+            <ThemeToggle />
+          </div>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-          {navItem('projects', 'Proyectos', SquaresFour, projects.length)}
+          {navItem('projects', t('Proyectos'), SquaresFour, projects.length)}
           {folders.length > 0 && (
             <div className="ml-3 pl-1.5 border-l border-border space-y-0.5 py-0.5">
               {folders.map((folder) => {
@@ -605,8 +620,8 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                           tabIndex={0}
                           onClick={() => handleRenameFolder(folder)}
                           className="p-0.5 rounded hover:text-foreground hover:bg-accent/50 cursor-pointer"
-                          data-tooltip="Renombrar carpeta"
-                          aria-label="Renombrar carpeta"
+                          data-tooltip={t('Renombrar carpeta')}
+                          aria-label={t('Renombrar carpeta')}
                         >
                           <PencilSimple className="w-3 h-3" />
                         </span>
@@ -615,8 +630,8 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                           tabIndex={0}
                           onClick={() => handleDeleteFolder(folder)}
                           className="p-0.5 rounded hover:text-destructive hover:bg-destructive/10 cursor-pointer"
-                          data-tooltip="Eliminar carpeta"
-                          aria-label="Eliminar carpeta"
+                          data-tooltip={t('Eliminar carpeta')}
+                          aria-label={t('Eliminar carpeta')}
                         >
                           <TrashSimple className="w-3 h-3" />
                         </span>
@@ -630,22 +645,22 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
               })}
             </div>
           )}
-          {navItem('trash', 'Papelera', TrashSimple, trashed.length)}
+          {navItem('trash', t('Papelera'), TrashSimple, trashed.length)}
         </nav>
 
         <div className="p-3 border-t border-border bg-secondary mt-auto flex flex-col gap-3">
           {/* Space used in this browser */}
-          <div className="px-1 space-y-1.5" data-tooltip="Espacio aproximado que ocupan tus proyectos en el almacenamiento local del navegador">
+          <div className="px-1 space-y-1.5" data-tooltip={t('Espacio aproximado que ocupan tus proyectos en el almacenamiento local del navegador')}>
             <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
               <span className="flex items-center gap-1">
                 <HardDrives className="w-3 h-3" />
-                Almacenamiento
+                {t('Almacenamiento')}
                 {warningDismissed && (
                   <span
                     className="text-muted-foreground hover:text-foreground transition-colors cursor-help"
-                    data-tooltip-title={STORAGE_WARNING_TITLE}
-                    data-tooltip={STORAGE_WARNING_TEXT}
-                    aria-label={`${STORAGE_WARNING_TITLE}. ${STORAGE_WARNING_TEXT}`}
+                    data-tooltip-title={t(STORAGE_WARNING_TITLE)}
+                    data-tooltip={t(STORAGE_WARNING_TEXT)}
+                    aria-label={`${t(STORAGE_WARNING_TITLE)}. ${t(STORAGE_WARNING_TEXT)}`}
                     role="img"
                   >
                     <Info className="w-3 h-3" />
@@ -669,10 +684,10 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                 ? 'bg-accent border-ring/40 text-foreground'
                 : 'bg-card hover:bg-accent border-border text-foreground'
             }`}
-            data-tooltip="Guarda todo tu espacio de trabajo en un archivo o pásalo a otro navegador"
+            data-tooltip={t('Guarda todo tu espacio de trabajo en un archivo o pásalo a otro navegador')}
           >
             <Archive className="w-4 h-4 text-muted-foreground" />
-            Respaldo
+            {t('Respaldo')}
           </button>
 
           <button
@@ -684,7 +699,7 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
             }`}
           >
             <Info className="w-4 h-4 text-muted-foreground" />
-            Acerca de Nori
+            {t('Acerca de Nori')}
             {updateAvailable && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-full" />}
           </button>
         </div>
@@ -721,9 +736,9 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                         onClick={() => openFolder(null)}
                         {...dropZone(ROOT_TARGET)}
                         className={`-mx-1.5 px-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 ${dropClass(ROOT_TARGET)}`}
-                        data-tooltip="Volver a Inicio (suelta aquí un proyecto para sacarlo de la carpeta)"
+                        data-tooltip={t('Volver a Inicio (suelta aquí un proyecto para sacarlo de la carpeta)')}
                       >
-                        Inicio
+                        {t('Inicio')}
                       </button>
                       <CaretRight className="w-4 h-4 text-muted-foreground shrink-0" weight="bold" />
                       <FolderOpen className="w-6 h-6 text-bento-yellow shrink-0" weight="fill" />
@@ -733,22 +748,22 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                         onRename={(name) => {
                           if (renameFolder(currentFolder.id, name)) {
                             refresh();
-                            toast(`Carpeta renombrada a "${name}"`, 'success');
+                            toast(t('Carpeta renombrada a "{name}"', { name }), 'success');
                           } else {
-                            toast('No se pudo renombrar la carpeta', 'error');
+                            toast(t('No se pudo renombrar la carpeta'), 'error');
                           }
                         }}
                       />
                     </h1>
                     <p className="text-muted-foreground text-xs mt-1.5 leading-normal max-w-xl">
-                      Los proyectos que crees o importes aquí se guardan en esta carpeta. Arrastra un proyecto a "Inicio" o a otra carpeta para moverlo.
+                      {t('Los proyectos que crees o importes aquí se guardan en esta carpeta. Arrastra un proyecto a "Inicio" o a otra carpeta para moverlo.')}
                     </p>
                   </div>
                 ) : (
                   <div className="min-w-0">
-                    <h1 className="text-2xl font-black text-foreground font-heading">Inicio</h1>
+                    <h1 className="text-2xl font-black text-foreground font-heading">{t('Inicio')}</h1>
                     <p className="text-muted-foreground text-xs mt-1.5 leading-normal max-w-xl">
-                      Tus animaciones se guardan solas mientras las editas. Pasa el cursor sobre un proyecto para ver su animación y haz clic para abrirlo; arrástralo sobre una carpeta para guardarlo en ella.
+                      {t('Tus animaciones se guardan solas mientras las editas. Pasa el cursor sobre un proyecto para ver su animación y haz clic para abrirlo; arrástralo sobre una carpeta para guardarlo en ella.')}
                     </p>
                   </div>
                 )}
@@ -759,14 +774,14 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                 <div className="p-4 bg-bento-orange-light border border-bento-orange/30 rounded-xl flex items-start gap-3 text-xs leading-relaxed">
                   <Warning className="w-5 h-5 shrink-0 text-bento-orange" />
                   <div className="text-foreground flex-1">
-                    <span className="font-semibold block mb-0.5 text-bento-orange">{STORAGE_WARNING_TITLE}</span>
-                    {STORAGE_WARNING_TEXT}
+                    <span className="font-semibold block mb-0.5 text-bento-orange">{t(STORAGE_WARNING_TITLE)}</span>
+                    {t(STORAGE_WARNING_TEXT)}
                   </div>
                   <button
                     onClick={dismissWarning}
                     className="p-1 -m-1 rounded-lg text-bento-orange/70 hover:text-bento-orange hover:bg-bento-orange/10 transition-colors cursor-pointer shrink-0"
-                    data-tooltip="Cerrar aviso (seguirá disponible en el icono de información de Almacenamiento)"
-                    aria-label="Cerrar aviso"
+                    data-tooltip={t('Cerrar aviso (seguirá disponible en el icono de información de Almacenamiento)')}
+                    aria-label={t('Cerrar aviso')}
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -776,20 +791,21 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
               {/* Create or import */}
               <section className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <MenuButton label="Crear" Icon={Plus} items={createItems} primary title="Proyecto en blanco, proyecto de ejemplo o carpeta" />
+                  <MenuButton label={t('Crear')} Icon={Plus} items={createItems} primary title={t('Proyecto en blanco, proyecto de ejemplo o carpeta')} />
                   <button
                     onClick={() => jsonInputRef.current?.click()}
-                    data-tooltip="Proyecto de Nori o animación Lottie"
+                    data-tooltip={t('Proyecto de Nori o animación Lottie')}
                     className="h-8 px-3 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap bg-card border-border text-foreground hover:bg-accent"
                   >
                     <FolderOpen className="w-4 h-4 text-bento-blue" />
-                    Abrir JSON / Lottie
+                    {t('Abrir JSON / Lottie')}
                   </button>
-                  <MenuButton label="Importar" Icon={DownloadSimple} items={importItems} title="Archivo SVG, código SVG o un frame de Figma" />
+                  <MenuButton label={t('Importar')} Icon={DownloadSimple} items={importItems} title={t('Archivo SVG, código SVG o un frame de Figma')} />
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  También puedes arrastrar un archivo .json (Nori o Lottie) o .svg a cualquier parte de la ventana
-                  {currentFolder ? '; se guardará en esta carpeta.' : '.'}
+                  {currentFolder
+                    ? t('También puedes arrastrar un archivo .json (Nori o Lottie) o .svg a cualquier parte de la ventana; se guardará en esta carpeta.')
+                    : t('También puedes arrastrar un archivo .json (Nori o Lottie) o .svg a cualquier parte de la ventana.')}
                 </p>
                 <input type="file" ref={jsonInputRef} onChange={handleFileChange} accept=".json,.nori.json" className="hidden" />
                 <input type="file" ref={svgInputRef} onChange={handleFileChange} accept=".svg,image/svg+xml" className="hidden" />
@@ -799,7 +815,7 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
               {!currentFolder && folders.length > 0 && (
                 <section className="space-y-3">
                   <h2 className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
-                    Carpetas <span className="font-mono">({folders.length})</span>
+                    {t('Carpetas')} <span className="font-mono">({folders.length})</span>
                   </h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {folders.map((folder) => (
@@ -820,7 +836,7 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
               {/* Saved projects, most recently edited first */}
               <section className="space-y-3 pb-4">
                 <h2 className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
-                  {currentFolder ? 'Proyectos en esta carpeta' : 'Mis proyectos'}{' '}
+                  {currentFolder ? t('Proyectos en esta carpeta') : t('Mis proyectos')}{' '}
                   <span className="font-mono">({visibleProjects.length})</span>
                 </h2>
                 {visibleProjects.length === 0 ? (
@@ -828,18 +844,18 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                     {currentFolder ? (
                       <>
                         <FolderOpen className="w-12 h-12 mx-auto mb-3 text-bento-yellow opacity-40" />
-                        <p className="text-sm font-semibold text-foreground">Carpeta vacía</p>
+                        <p className="text-sm font-semibold text-foreground">{t('Carpeta vacía')}</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Crea o importa un proyecto aquí, o arrastra uno desde Inicio hasta esta carpeta en la barra lateral.
+                          {t('Crea o importa un proyecto aquí, o arrastra uno desde Inicio hasta esta carpeta en la barra lateral.')}
                         </p>
                       </>
                     ) : (
                       <>
                         <SquaresFour className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-30" />
                         <p className="text-sm font-semibold text-foreground">
-                          {projects.length > 0 ? 'No hay proyectos fuera de las carpetas' : 'Aún no tienes proyectos'}
+                          {projects.length > 0 ? t('No hay proyectos fuera de las carpetas') : t('Aún no tienes proyectos')}
                         </p>
-                        <p className="text-xs text-muted-foreground mt-1">Crea uno nuevo o importa un archivo para empezar.</p>
+                        <p className="text-xs text-muted-foreground mt-1">{t('Crea uno nuevo o importa un archivo para empezar.')}</p>
                       </>
                     )}
                   </div>
@@ -869,10 +885,13 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
             <div className="w-14 h-14 rounded-2xl bg-bento-blue text-white flex items-center justify-center shadow-card">
               <DownloadSimple className="w-7 h-7" />
             </div>
-            <p className="text-base font-bold text-foreground font-heading">Suelta el archivo para importarlo</p>
+            <p className="text-base font-bold text-foreground font-heading">{t('Suelta el archivo para importarlo')}</p>
             <p className="text-xs text-muted-foreground">
-              Proyecto de Nori o animación Lottie (.json) o imagen .svg · se creará un proyecto nuevo
-              {targetFolderId && currentFolder ? ` en la carpeta "${currentFolder.name}"` : ''}
+              {targetFolderId && currentFolder
+                ? t('Proyecto de Nori o animación Lottie (.json) o imagen .svg · se creará un proyecto nuevo en la carpeta "{name}"', {
+                    name: currentFolder.name,
+                  })
+                : t('Proyecto de Nori o animación Lottie (.json) o imagen .svg · se creará un proyecto nuevo')}
             </p>
           </div>
         </div>
@@ -942,7 +961,7 @@ function ProjectCard({ meta, dragProps, dragging, onOpen, onOpenMenu }: ProjectC
           <h3 className="font-semibold text-foreground text-sm truncate font-heading">{meta.title}</h3>
           <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
             {project ? `${project.width} × ${project.height} · ${project.duration}s · ` : ''}
-            Editado {formatRelative(meta.updatedAt)}
+            {t('Editado {time}', { time: formatRelative(meta.updatedAt) })}
           </p>
         </div>
         <button
@@ -952,8 +971,8 @@ function ProjectCard({ meta, dragProps, dragging, onOpen, onOpenMenu }: ProjectC
             onOpenMenu(rect.left, rect.bottom + 4);
           }}
           className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 cursor-pointer"
-          data-tooltip="Más opciones"
-          aria-label="Más opciones"
+          data-tooltip={t('Más opciones')}
+          aria-label={t('Más opciones')}
         >
           <DotsThree className="w-4 h-4" weight="bold" />
         </button>
@@ -997,8 +1016,8 @@ function FolderTitleInput({ name, onRename }: { name: string; onRename: (name: s
       size={Math.max(4, draft.length + 1)}
       maxLength={60}
       spellCheck={false}
-      data-tooltip="Clic para renombrar la carpeta"
-      aria-label="Nombre de la carpeta"
+      data-tooltip={t('Clic para renombrar la carpeta')}
+      aria-label={t('Nombre de la carpeta')}
       className="min-w-0 max-w-full bg-transparent border-0 text-foreground text-2xl font-black font-heading hover:bg-accent focus:bg-card -ml-1 px-1.5 py-0.5 rounded-xl focus:outline-none transition-colors focus:ring-1 focus:ring-ring truncate"
     />
   );
@@ -1044,7 +1063,7 @@ function FolderCard({ folder, count, dropProps, isDropTarget, onOpen, onOpenMenu
         <h3 className="font-semibold text-foreground text-sm truncate font-heading">{folder.name}</h3>
         <p className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
           <File className="w-3 h-3 shrink-0" />
-          {count === 0 ? 'Vacía' : count === 1 ? '1 proyecto' : `${count} proyectos`}
+          {count === 0 ? t('Vacía') : count === 1 ? t('1 proyecto') : t('{count} proyectos', { count })}
         </p>
       </div>
       <button
@@ -1054,8 +1073,8 @@ function FolderCard({ folder, count, dropProps, isDropTarget, onOpen, onOpenMenu
           onOpenMenu(rect.left, rect.bottom + 4);
         }}
         className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 cursor-pointer"
-        data-tooltip="Más opciones"
-        aria-label="Más opciones"
+        data-tooltip={t('Más opciones')}
+        aria-label={t('Más opciones')}
       >
         <DotsThree className="w-4 h-4" weight="bold" />
       </button>
@@ -1080,10 +1099,10 @@ function TrashSection({ trashed, onRestore, onDeleteForever, onEmpty }: TrashSec
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-foreground font-heading flex items-center gap-2">
               <Trash className="w-5 h-5 text-destructive shrink-0" />
-              Papelera de reciclaje
+              {t('Papelera de reciclaje')}
             </h2>
             <p className="text-xs text-muted-foreground mt-1">
-              Los proyectos borrados se mueven aquí. Puedes restaurarlos o eliminarlos permanentemente; mientras estén aquí siguen ocupando espacio en el navegador.
+              {t('Los proyectos borrados se mueven aquí. Puedes restaurarlos o eliminarlos permanentemente; mientras estén aquí siguen ocupando espacio en el navegador.')}
             </p>
           </div>
           {trashed.length > 0 && (
@@ -1092,7 +1111,7 @@ function TrashSection({ trashed, onRestore, onDeleteForever, onEmpty }: TrashSec
               className="px-3 py-2 bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
             >
               <TrashSimple className="w-3.5 h-3.5" />
-              Vaciar papelera
+              {t('Vaciar papelera')}
             </button>
           )}
         </div>
@@ -1102,8 +1121,8 @@ function TrashSection({ trashed, onRestore, onDeleteForever, onEmpty }: TrashSec
         {trashed.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Trash className="w-12 h-12 mb-4 opacity-20" />
-            <p className="text-sm font-semibold">La papelera está vacía</p>
-            <p className="text-xs mt-1">Los proyectos que borres aparecerán aquí.</p>
+            <p className="text-sm font-semibold">{t('La papelera está vacía')}</p>
+            <p className="text-xs mt-1">{t('Los proyectos que borres aparecerán aquí.')}</p>
           </div>
         ) : (
           <div className="space-y-2 max-w-3xl mx-auto">
@@ -1133,9 +1152,9 @@ function TrashRow({
       <div className="flex-1 min-w-0">
         <h4 className="text-sm font-semibold text-foreground truncate">{meta.title}</h4>
         <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground">
-          <span>Borrado {formatRelative(meta.deletedAt ?? meta.updatedAt)}</span>
+          <span>{t('Borrado {time}', { time: formatRelative(meta.deletedAt ?? meta.updatedAt) })}</span>
           <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
-          <span>Editado {formatRelative(meta.updatedAt)}</span>
+          <span>{t('Editado {time}', { time: formatRelative(meta.updatedAt) })}</span>
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
@@ -1144,13 +1163,13 @@ function TrashRow({
           className="px-2.5 py-1.5 rounded-lg hover:bg-accent text-bento-green text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
         >
           <ArrowCounterClockwise className="w-4 h-4" />
-          Restaurar
+          {t('Restaurar')}
         </button>
         <button
           onClick={() => onDeleteForever(meta)}
           className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-          data-tooltip="Eliminar permanentemente"
-          aria-label="Eliminar permanentemente"
+          data-tooltip={t('Eliminar permanentemente')}
+          aria-label={t('Eliminar permanentemente')}
         >
           <TrashSimple className="w-4 h-4" />
         </button>

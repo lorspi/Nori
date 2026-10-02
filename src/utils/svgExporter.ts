@@ -3,7 +3,7 @@ import { getLayerPropertiesAtTime } from './interpolator';
 import { getShapePathData } from './pathGeometry';
 import { BoundingBox, getLayerLocalBounds, getPathBounds } from './renderer';
 import { BooleanResult, canBeBooleanOperand, operandsBounds, resolveBooleanGroup } from './booleanOps';
-import { getChildren } from './layerTree';
+import { getChildren, getParent } from './layerTree';
 
 export interface SvgExportOptions {
   transparent?: boolean;
@@ -509,18 +509,19 @@ export function exportToAnimatedSvg(
     defs: [],
   };
 
-  const layerElements: string[] = [];
-
-  project.layers.forEach((layer, layerIdx) => {
-    // Shapes inside a boolean group are exported by the group
-    if (!layer.visible || layer.parentId) return;
-
+  // Layers inside a group are exported by the group (a plain group nests their elements, a
+  // boolean group combines them)
+  const exportLayer = (layer: Layer): string => {
+    if (!layer.visible) return '';
+    const layerIdx = project.layers.indexOf(layer);
     const animName = `anim_layer_${layerIdx}_${safeId(layer.id)}`;
     const uid = `${layerIdx}_${safeId(layer.id)}`;
     const morphs = addLayerAnimation(ctx, layer, animName, true);
 
     let content: string;
-    if (layer.type === 'boolean') {
+    if (layer.type === 'group') {
+      content = getChildren(project.layers, layer.id).map(exportLayer).join('\n');
+    } else if (layer.type === 'boolean') {
       content = exportBooleanGroup(ctx, layer, uid);
     } else {
       // Render layer element at initial default
@@ -532,12 +533,14 @@ export function exportToAnimatedSvg(
       content = wrapShadows(ctx, layer, p0, uid, content, bounds, morphs ? Math.max(bounds.width, bounds.height) : 0);
     }
 
-    layerElements.push(`
+    return `
       <g id="${layer.id}" class="${animName}">
         ${content}
       </g>
-    `);
-  });
+    `;
+  };
+
+  const layerElements = project.layers.filter((l) => !l.parentId).map(exportLayer);
 
   const bgRect = !opts.transparent
     ? `<rect width="100%" height="100%" fill="${opts.backgroundColor || project.backgroundColor || '#ffffff'}" />`
@@ -563,7 +566,8 @@ export function hasAnimatedBooleanGroups(project: Project): boolean {
   const fps = 30;
   const samples = Math.min(120, Math.max(20, Math.round(project.duration * fps)));
   return project.layers.some((group) => {
-    if (group.type !== 'boolean' || group.parentId || !group.visible) return false;
+    // Only the outer boolean groups (nested ones are part of their result)
+    if (group.type !== 'boolean' || getParent(project.layers, group)?.type === 'boolean' || !group.visible) return false;
     const outlines = Array.from({ length: samples + 1 }, (_, s) =>
       resolveBooleanGroup(project.layers, group, (s / samples) * project.duration).d
     );

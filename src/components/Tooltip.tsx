@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { t, useLanguage } from '../i18n';
 
 // App-wide tooltips. Any element with a data-tooltip attribute shows it on hover;
 // data-shortcut adds key caps ("Ctrl+G", alternatives separated by " / ") and data-tooltip-title
@@ -28,18 +29,21 @@ const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(naviga
 
 // Key caps for a shortcut: "Ctrl+Shift+Z / Ctrl+Y" -> [["Ctrl","Shift","Z"], ["Ctrl","Y"]]
 export const ShortcutKeys: React.FC<{ shortcut: string; className?: string }> = ({ shortcut, className = '' }) => {
+  // Rendered by the tooltip layer, outside App: follows language changes on its own
+  useLanguage();
   const alternatives = shortcut.split(' / ').map((alt) =>
     alt
       .split(/\+(?!$)/)
       .map((k) => k.trim())
       .filter(Boolean)
-      .map((k) => (IS_MAC && k === 'Ctrl' ? '⌘' : k))
+      // Named keys (Supr, Espacio, Flechas) are translated; letters and modifiers are kept
+      .map((k) => (IS_MAC && k === 'Ctrl' ? '⌘' : k.length > 1 ? t(k) : k))
   );
   return (
     <span className={`flex items-center gap-1 shrink-0 ${className}`}>
       {alternatives.map((keys, i) => (
         <React.Fragment key={i}>
-          {i > 0 && <span className="opacity-60 px-0.5">o</span>}
+          {i > 0 && <span className="opacity-60 px-0.5">{t('o')}</span>}
           {keys.map((key, j) => (
             <kbd
               key={j}
@@ -55,6 +59,7 @@ export const ShortcutKeys: React.FC<{ shortcut: string; className?: string }> = 
 };
 
 export const TooltipLayer: React.FC = () => {
+  useLanguage();
   const [tip, setTip] = useState<TooltipState | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);

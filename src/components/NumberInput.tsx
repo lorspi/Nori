@@ -1,14 +1,22 @@
 import React, { useRef, useState } from 'react';
+import { getLanguage } from '../i18n';
 
-// Numbers are shown with a decimal comma; typing a point also works and turns into a comma
-export const formatDecimal = (value: number) => String(value).replace('.', ',');
+// Decimal separator of the interface language: a comma in Spanish, a point in English
+export const decimalSeparator = () => (getLanguage() === 'es' ? ',' : '.');
 
-// Keeps a leading minus, digits and one decimal comma ("." is turned into ",")
+// Numbers are shown with the language's separator; typing the other one also works and turns into it
+export const formatDecimal = (value: number) => String(value).replace('.', decimalSeparator());
+
+// Turns points and commas into the language's decimal separator
+export const toDecimalSeparator = (text: string) => text.replace(/[.,]/g, decimalSeparator());
+
+// Keeps a leading minus, digits and one decimal separator (a point or a comma)
 const sanitize = (text: string) => {
-  const cleaned = text.replace(/\./g, ',').replace(/[^0-9,-]/g, '');
+  const sep = decimalSeparator();
+  const cleaned = text.replace(/[.,]/g, ',').replace(/[^0-9,-]/g, '');
   const negative = cleaned.startsWith('-');
   const [whole, ...decimals] = cleaned.replace(/-/g, '').split(',');
-  return `${negative ? '-' : ''}${whole}${decimals.length > 0 ? `,${decimals.join('')}` : ''}`;
+  return `${negative ? '-' : ''}${whole}${decimals.length > 0 ? `${sep}${decimals.join('')}` : ''}`;
 };
 
 // null while the text isn't a number yet ("", "-", ",")
@@ -33,7 +41,7 @@ interface NumberInputProps
   decimals?: number;
 }
 
-// Numeric field that accepts a point or a comma as the decimal separator.
+// Numeric field that accepts a point or a comma as the decimal separator (shown as the language's).
 // data-numeric lets Space keep toggling playback while it has the focus.
 export const NumberInput: React.FC<NumberInputProps> = ({
   value,
@@ -66,7 +74,7 @@ export const NumberInput: React.FC<NumberInputProps> = ({
       autoComplete="off"
       spellCheck={false}
       data-numeric=""
-      value={draft ?? (decimals === undefined ? formatDecimal(value) : value.toFixed(decimals).replace('.', ','))}
+      value={draft ?? (decimals === undefined ? formatDecimal(value) : value.toFixed(decimals).replace('.', decimalSeparator()))}
       onChange={(e) => {
         const text = sanitize(e.target.value);
         setDraft(text);

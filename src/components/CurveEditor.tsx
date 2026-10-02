@@ -20,6 +20,7 @@ import {
   moveSpringHandle,
   toCustomEasing,
 } from '../utils/easingPresets';
+import { getLanguage, t } from '../i18n';
 
 interface CurveEditorProps {
   easing: EasingConfig;
@@ -257,12 +258,14 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
   );
 
   // ── Dropdown ──────────────────────────────────────────────────────────────
+  // The labels are translated inside the memo, so it also depends on the language
+  const language = getLanguage();
   const menuOptions = useMemo(
     () =>
       EASING_MENU.map((item) => ({
         value: item.id,
-        label: item.label,
-        description: item.description,
+        label: t(item.label),
+        description: t(item.description),
         separatorBefore: item.id === 'custom',
         icon: (
           <EasingThumb
@@ -276,7 +279,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
           />
         ),
       })),
-    [easing, menuId]
+    [easing, menuId, language]
   );
 
   const handleMenuChange = (id: EasingMenuId) => {
@@ -336,10 +339,10 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
     model === 'linear'
       ? null
       : model === 'spring'
-        ? 'Arrastra el punto: altura = rebote, posición = velocidad'
+        ? t('Arrastra el punto: altura = rebote, posición = velocidad')
         : model === 'bounce'
-          ? 'Arrastra el punto: altura = elasticidad, posición = rebotes'
-          : 'Arrastra los puntos para ajustar la curva';
+          ? t('Arrastra el punto: altura = elasticidad, posición = rebotes')
+          : t('Arrastra los puntos para ajustar la curva');
 
   return (
     <div className="space-y-2">
@@ -353,8 +356,8 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
         className="w-full font-medium"
         menuClassName="w-full"
         optionClassName=""
-        title="Curva de suavizado"
-        ariaLabel="Curva de suavizado"
+        title={t('Curva de suavizado')}
+        ariaLabel={t('Curva de suavizado')}
       />
 
       {/* The visual curve graph */}
@@ -364,7 +367,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
           viewBox={`0 0 ${W} ${H}`}
           className="w-full h-auto overflow-visible touch-none"
           role="img"
-          aria-label="Gráfica de la curva de suavizado"
+          aria-label={t('Gráfica de la curva de suavizado')}
         >
           {/* Frame: start (0%) and target (100%) values, start and end of the segment */}
           <line x1={px(0)} y1={py(0)} x2={px(1)} y2={py(0)} className="stroke-border" />
@@ -453,14 +456,14 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
           type="button"
           onClick={() => (isPreviewRunning ? stopPreview() : setPreviewRun((n) => n + 1))}
           className="absolute top-2 right-2 p-1 rounded-md bg-card border border-border hover:bg-accent text-foreground transition-colors flex items-center gap-1 text-[10px]"
-          data-tooltip={`Previsualizar la animación (${previewDuration.toFixed(2)}s)`}
+          data-tooltip={t('Previsualizar la animación ({duration}s)', { duration: previewDuration.toFixed(2) })}
         >
           {isPreviewRunning ? (
             <Stop className="w-2.5 h-2.5 text-bento-green" weight="fill" />
           ) : (
             <Play className="w-2.5 h-2.5 text-bento-green" weight="fill" />
           )}
-          <span>{isPreviewRunning ? 'Stop' : 'Test'}</span>
+          <span>{isPreviewRunning ? t('Stop') : t('Test')}</span>
         </button>
 
         {/* Preview lane: an object moving at the pace of the curve */}
@@ -488,7 +491,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
             {renderBezierField('x2', 'X2')}
             {renderBezierField('y2', 'Y2')}
           </div>
-          <p className="text-[10px] text-muted-foreground truncate select-text" data-tooltip="Equivalente en CSS">
+          <p className="text-[10px] text-muted-foreground truncate select-text" data-tooltip={t('Equivalente en CSS')}>
             cubic-bezier({fmt(bezier.x1)}, {fmt(bezier.y1)}, {fmt(bezier.x2)}, {fmt(bezier.y2)})
           </p>
         </div>
@@ -504,7 +507,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
               onChange={(v) => setSpringParam('stiffness', v, false)}
               className="text-muted-foreground"
             >
-              Stiffness (Rigidez)
+              {t('Stiffness (Rigidez)')}
             </ScrubLabel>
             <NumberInput
               step={5}
@@ -521,7 +524,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
               onChange={(v) => setSpringParam('damping', v, false)}
               className="text-muted-foreground"
             >
-              Damping (Fricción)
+              {t('Damping (Fricción)')}
             </ScrubLabel>
             <NumberInput
               step={0.5}
@@ -539,7 +542,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
               onChange={(v) => setSpringParam('mass', v, false)}
               className="text-muted-foreground"
             >
-              Mass (Masa)
+              {t('Mass (Masa)')}
             </ScrubLabel>
             <NumberInput
               step={0.1}
@@ -565,7 +568,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
               onChange={(v) => setBounceParam('bounces', v, false)}
               className="text-muted-foreground"
             >
-              Rebotes
+              {t('Rebotes')}
             </ScrubLabel>
             <NumberInput
               step={1}
@@ -586,7 +589,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
               onChange={(v) => setBounceParam('restitution', v, false)}
               className="text-muted-foreground"
             >
-              Elasticidad
+              {t('Elasticidad')}
             </ScrubLabel>
             <NumberInput
               step={0.05}
@@ -602,7 +605,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
 
       {model === 'linear' && (
         <p className="text-[10px] text-muted-foreground leading-snug">
-          Velocidad constante, sin parámetros. Elige «Personalizada» para editar la curva con puntos.
+          {t('Velocidad constante, sin parámetros. Elige «Personalizada» para editar la curva con puntos.')}
         </p>
       )}
     </div>

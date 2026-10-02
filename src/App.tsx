@@ -22,6 +22,7 @@ import { importProjectFile } from './utils/projectFiles';
 import Editor from './Editor';
 import Home from './components/Home';
 import { useUI } from './lib/ui';
+import { t, useLanguage } from './i18n';
 
 interface OpenSession {
   project: Project;
@@ -45,7 +46,9 @@ function getInitialSession(): OpenSession | null {
   if (last) return { project: last, autoplay: false };
 
   if (firstVisit) {
-    const example = JSON.parse(JSON.stringify(NORI_INTRO_PROJECT)) as Project;
+    const intro = JSON.parse(JSON.stringify(NORI_INTRO_PROJECT)) as Project;
+    // Layer names of the example in the interface language
+    const example: Project = { ...intro, layers: intro.layers.map((layer) => ({ ...layer, name: t(layer.name) })) };
     const stored = createProject(example);
     if (stored) setLastProjectId(stored.id);
     // Without storage the example still opens, it just isn't kept
@@ -64,6 +67,8 @@ function localStorageHas(key: string) {
 
 export default function App() {
   const { toast } = useUI();
+  // The whole interface renders again in the new language when it changes
+  useLanguage();
   const [session, setSession] = useState<OpenSession | null>(getInitialSession);
 
   // Remember whether the editor is open, so a reload comes back to it (Inicio stores its own view)
@@ -74,7 +79,7 @@ export default function App() {
   const openProject = (id: string) => {
     const project = loadProject(id);
     if (!project) {
-      toast('No se pudo abrir el proyecto', 'error');
+      toast(t('No se pudo abrir el proyecto'), 'error');
       return;
     }
     setLastProjectId(id);
@@ -86,7 +91,7 @@ export default function App() {
   const createAndOpen = (project: Project, message: string, autoplay = false, folderId?: string | null) => {
     const stored = createProject(project, folderId);
     if (!stored) {
-      toast('No se pudo guardar el proyecto en el navegador (espacio insuficiente o almacenamiento bloqueado)', 'error');
+      toast(t('No se pudo guardar el proyecto en el navegador (espacio insuficiente o almacenamiento bloqueado)'), 'error');
       return;
     }
     setLastProjectId(stored.id);
@@ -111,7 +116,7 @@ export default function App() {
         const { project, message } = await importProjectFile(file);
         createAndOpen(project, message, false, folderId);
       } catch (err: any) {
-        toast(err?.message || 'No se pudo importar el archivo', 'error');
+        toast(err?.message || t('No se pudo importar el archivo'), 'error');
       }
     };
     window.addEventListener('dragover', handleDragOver);

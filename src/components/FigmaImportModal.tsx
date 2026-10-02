@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ClipboardText, CircleNotch, FigmaLogo, X } from '@phosphor-icons/react';
 import { ClipboardContent, classifyClipboardEvent, readClipboard } from '../utils/clipboard';
+import { getLanguage, t } from '../i18n';
 
 interface FigmaImportModalProps {
   isOpen: boolean;
@@ -8,6 +9,15 @@ interface FigmaImportModalProps {
   onImport: (svgText: string) => void;
 }
 
+// Translated text whose placeholders are replaced by markup: {button} → parts.button
+function fill(text: string, parts: Record<string, React.ReactNode>): React.ReactNode[] {
+  return text.split(/(\{\w+\})/g).map((piece, i) => {
+    const match = piece.match(/^\{(\w+)\}$/);
+    return <React.Fragment key={i}>{match && match[1] in parts ? parts[match[1]] : piece}</React.Fragment>;
+  });
+}
+
+// Spanish keys, translated when shown
 const MESSAGES = {
   figma:
     'Lo que hay en el portapapeles es una copia normal de Figma (Ctrl + C), que usa un formato propio que Nori no puede leer. Vuelve a copiar el frame con "Copiar como SVG".',
@@ -73,17 +83,31 @@ export const FigmaImportModal: React.FC<FigmaImportModalProps> = ({ isOpen, onCl
   };
 
   const steps: React.ReactNode[] = [
-    <>En Figma, selecciona el <strong className="text-foreground">frame</strong> (artboard) que quieres animar.</>,
+    fill(t('En Figma, selecciona el {frame} (artboard) que quieres animar.'), {
+      frame: <strong className="text-foreground">{t('frame')}</strong>,
+    }),
     <>
-      Haz clic derecho sobre él y elige{' '}
-      <strong className="text-foreground">Copiar/Pegar como › Copiar como SVG</strong>{' '}
-      <span className="text-muted-foreground/80">(Copy/Paste as › Copy as SVG)</span>.
+      {fill(t('Haz clic derecho sobre él y elige {command}'), {
+        command: <strong className="text-foreground">{t('Copiar/Pegar como › Copiar como SVG')}</strong>,
+      })}
+      {/* Figma's English menu names, for those using it in English (redundant when Nori is in English) */}
+      {getLanguage() === 'es' && (
+        <>
+          {' '}
+          <span className="text-muted-foreground/80">(Copy/Paste as › Copy as SVG)</span>
+        </>
+      )}
+      .
     </>,
-    <>
-      Vuelve aquí y pulsa <strong className="text-foreground">Importar</strong> o{' '}
-      <kbd className="px-1 py-0.5 rounded border border-border bg-secondary font-mono text-[10px]">Ctrl</kbd>{' '}
-      <kbd className="px-1 py-0.5 rounded border border-border bg-secondary font-mono text-[10px]">V</kbd>.
-    </>,
+    fill(t('Vuelve aquí y pulsa {button} o {keys}.'), {
+      button: <strong className="text-foreground">{t('Importar')}</strong>,
+      keys: (
+        <>
+          <kbd className="px-1 py-0.5 rounded border border-border bg-secondary font-mono text-[10px]">Ctrl</kbd>{' '}
+          <kbd className="px-1 py-0.5 rounded border border-border bg-secondary font-mono text-[10px]">V</kbd>
+        </>
+      ),
+    }),
   ];
 
   return (
@@ -101,14 +125,14 @@ export const FigmaImportModal: React.FC<FigmaImportModalProps> = ({ isOpen, onCl
               <FigmaLogo className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-foreground font-heading">Importar desde Figma</h2>
-              <span className="text-[11px] text-muted-foreground">Crea un proyecto nuevo a partir de un frame de Figma</span>
+              <h2 className="text-sm font-bold text-foreground font-heading">{t('Importar desde Figma')}</h2>
+              <span className="text-[11px] text-muted-foreground">{t('Crea un proyecto nuevo a partir de un frame de Figma')}</span>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            data-tooltip="Cerrar"
+            data-tooltip={t('Cerrar')}
             data-shortcut="Esc"
           >
             <X className="w-4 h-4" />
@@ -128,12 +152,11 @@ export const FigmaImportModal: React.FC<FigmaImportModalProps> = ({ isOpen, onCl
             ))}
           </ol>
           <p className="text-[11px] leading-relaxed border-t border-border pt-3">
-            El lienzo toma el tamaño del frame y su color de fondo, y cada forma pasa a ser una capa. Los textos llegan
-            convertidos en trazados, los degradados se aproximan con su primer color y las imágenes se omiten.
+            {t('El lienzo toma el tamaño del frame y su color de fondo, y cada forma pasa a ser una capa. Los textos llegan convertidos en trazados, los degradados se aproximan con su primer color y las imágenes se omiten.')}
           </p>
           {message && (
             <p className="text-[11px] leading-relaxed text-bento-orange" role="alert">
-              {message}
+              {t(message)}
             </p>
           )}
         </div>
@@ -144,7 +167,7 @@ export const FigmaImportModal: React.FC<FigmaImportModalProps> = ({ isOpen, onCl
             onClick={onClose}
             className="px-4 py-2 text-xs font-semibold rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           >
-            Cancelar
+            {t('Cancelar')}
           </button>
           <button
             onClick={handleImportClick}
@@ -152,7 +175,7 @@ export const FigmaImportModal: React.FC<FigmaImportModalProps> = ({ isOpen, onCl
             className="px-4 py-2 text-xs font-bold rounded-xl bg-bento-blue hover:bg-bento-blue/90 text-white flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
           >
             {isReading ? <CircleNotch className="w-3.5 h-3.5 animate-spin" /> : <ClipboardText className="w-3.5 h-3.5" />}
-            <span>Importar</span>
+            <span>{t('Importar')}</span>
           </button>
         </div>
       </div>

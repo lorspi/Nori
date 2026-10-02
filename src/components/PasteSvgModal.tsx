@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ClipboardText, FileSvg, X } from '@phosphor-icons/react';
 import { isSvgText } from '../utils/svgImporter';
+import { t } from '../i18n';
 
 interface PasteSvgModalProps {
   isOpen: boolean;
@@ -53,16 +54,16 @@ export const PasteSvgModal: React.FC<PasteSvgModalProps> = ({ isOpen, onClose, o
               <ClipboardText className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-foreground font-heading">Importar SVG desde el portapapeles</h2>
+              <h2 className="text-sm font-bold text-foreground font-heading">{t('Importar SVG desde el portapapeles')}</h2>
               <span className="text-[11px] text-muted-foreground">
-                Pega el código del SVG; se abrirá como un proyecto nuevo
+                {t('Pega el código del SVG; se abrirá como un proyecto nuevo')}
               </span>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            data-tooltip="Cerrar"
+            data-tooltip={t('Cerrar')}
             data-shortcut="Esc"
           >
             <X className="w-4 h-4" />
@@ -86,19 +87,19 @@ export const PasteSvgModal: React.FC<PasteSvgModalProps> = ({ isOpen, onClose, o
             className="w-full h-[50vh] min-h-64 resize-none bg-secondary border border-border rounded-xl p-3 font-mono text-[11px] leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-bento-blue select-text"
           />
           {code.trim() && !isValid && (
-            <p className="mt-2 text-[11px] text-bento-orange">El texto pegado no contiene un elemento &lt;svg&gt;.</p>
+            <p className="mt-2 text-[11px] text-bento-orange">{t('El texto pegado no contiene un elemento <svg>.')}</p>
           )}
         </div>
 
         {/* Footer Actions */}
         <div className="px-5 py-4 border-t border-border bg-secondary/40 flex items-center justify-between gap-2">
-          <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline">Ctrl + Enter para importar</span>
+          <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline">{t('Ctrl + Enter para importar')}</span>
           <div className="flex gap-2 ml-auto">
             <button
               onClick={onClose}
               className="px-4 py-2 text-xs font-semibold rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
             >
-              Cancelar
+              {t('Cancelar')}
             </button>
             <button
               onClick={handleImport}
@@ -106,7 +107,7 @@ export const PasteSvgModal: React.FC<PasteSvgModalProps> = ({ isOpen, onClose, o
               className="px-4 py-2 text-xs font-bold rounded-xl bg-bento-blue hover:bg-bento-blue/90 text-white flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <FileSvg className="w-3.5 h-3.5" />
-              <span>Importar</span>
+              <span>{t('Importar')}</span>
             </button>
           </div>
         </div>

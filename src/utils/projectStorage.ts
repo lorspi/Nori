@@ -1,4 +1,5 @@
 import { Project } from '../types/animation';
+import { getLanguage, t } from '../i18n';
 
 // Every project lives in this browser's localStorage: an index with the metadata of all
 // of them and one entry per project with its data. The id of the last opened project is
@@ -159,7 +160,7 @@ export function createProject(project: Project, folderId?: string | null): Proje
 export function duplicateProject(id: string): Project | null {
   const source = loadProject(id);
   if (!source) return null;
-  return createProject({ ...source, title: `${source.title} (copia)` }, getProjectMeta(id)?.folderId);
+  return createProject({ ...source, title: t('{title} (copia)', { title: source.title }) }, getProjectMeta(id)?.folderId);
 }
 
 export function renameProject(id: string, title: string): boolean {
@@ -228,7 +229,7 @@ function writeFolders(folders: FolderMeta[]): boolean {
 
 /** Folders in alphabetical order */
 export function listFolders(): FolderMeta[] {
-  return readFolders().sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base', numeric: true }));
+  return readFolders().sort((a, b) => a.name.localeCompare(b.name, getLanguage(), { sensitivity: 'base', numeric: true }));
 }
 
 export function getFolder(id: string): FolderMeta | null {

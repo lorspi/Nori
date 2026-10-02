@@ -58,6 +58,6 @@ export class GifEncoder {
   public finish(): Blob {
     this.gif.finish();
     const bytes = this.gif.bytes();
-    return new Blob([bytes], { type: 'image/gif' });
+    return new Blob([new Uint8Array(bytes)], { type: 'image/gif' });
   }
 }

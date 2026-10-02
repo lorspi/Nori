@@ -54,6 +54,7 @@ import {
 import { hasBooleanLayers, useBooleanEngine } from '../utils/booleanOps';
 import { ToolMode } from './TopBar';
 import { X, Question, BezierCurve, LineSegment } from '@phosphor-icons/react';
+import { t } from '../i18n';
 
 // Icons of the mirroring options: a vertex with its two handles
 const MirrorIcon: React.FC<{ mode: MirrorMode }> = ({ mode }) => {
@@ -376,7 +377,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
   // Shown, and neither the layer nor a group around it is locked
   const isEditable = (layer: Layer) => isLayerShown(layers, layer, currentTime) && !isLayerLocked(layers, layer);
 
-  // A layer is edited in the space it lives in: its boolean group's coordinates (the canvas at the
+  // A layer is edited in the space it lives in: its group's coordinates (the canvas at the
   // top level). Points are taken there, and the zoom seen from there keeps handle sizes on screen.
   const parentMatrix = (layer: Layer) => getParentWorldMatrix(layers, layer, currentTime);
   const toParentSpace = (layer: Layer, pt: Point): Point => applyAffine(invertAffine(parentMatrix(layer)), pt.x, pt.y);
@@ -429,6 +430,11 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     for (let i = layers.length - 1; i >= 0; i--) {
       const layer = layers[i];
       if (layer.parentId !== parentId || !isEditable(layer)) continue;
+      // A plain group is hit where one of its layers is
+      if (layer.type === 'group') {
+        if (hitTestIn(layer.id, canvasPt)) return layer;
+        continue;
+      }
 
       const p = getLayerPropertiesAtTime(layer, currentTime);
       const bounds = getLayerLocalBounds(layer, p);
@@ -449,7 +455,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     return null;
   };
 
-  // Top-most layer under the point. A boolean group is picked as a whole; once one of its
+  // Top-most layer under the point. A group is picked as a whole; once one of its
   // children is selected, clicks pick among the children first and then the levels around them,
   // so clicking elsewhere leaves the group (as in Figma).
   const hitTestLayer = (pt: Point): Layer | null => {
@@ -631,9 +637,9 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       const step = e.shiftKey ? 10 : 1;
       // Canvas offset expressed in the layer's own (rotated / scaled) coordinates
       const o = toParentSpace(layer, { x: 0, y: 0 });
-      const t = toParentSpace(layer, { x: d[0] * step, y: d[1] * step });
+      const offset = toParentSpace(layer, { x: d[0] * step, y: d[1] * step });
       const origin = worldToLayerLocal(props, o.x, o.y);
-      const target = worldToLayerLocal(props, t.x, t.y);
+      const target = worldToLayerLocal(props, offset.x, offset.y);
       const segments = parsePath(props.pathData);
       const moved = moveVertices(
         segments,
@@ -1026,8 +1032,8 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       onMouseMove={handleMouseMove}
       onDoubleClick={(e) => {
         // Double click on a path (or the edited one) toggles vertex editing; on a vertex it
-        // turns it into a curve or back into a corner; on a boolean group it selects the shape
-        // under the cursor inside it
+        // turns it into a curve or back into a corner; on a group it selects the layer under the
+        // cursor inside it
         if (activeTool !== 'select' || e.button !== 0) return;
         const pt = clientToCanvas(e.clientX, e.clientY);
         if (hitTestBezierHandle(pt)) return;
@@ -1039,7 +1045,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           return;
         }
         const hit = hitTestLayer(pt);
-        if (hit?.type === 'boolean') {
+        if (hit?.type === 'boolean' || hit?.type === 'group') {
           const child = hitTestIn(hit.id, pt);
           if (child) onSelectLayers([child.id], child.id);
           return;
@@ -1079,13 +1085,13 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           {vertexEditLayerId && (
             <>
               <span>·</span>
-              <span className="text-bento-blue">Editando vértices (Esc o Enter para salir)</span>
+              <span className="text-bento-blue">{t('Editando vértices (Esc o Enter para salir)')}</span>
             </>
           )}
           {selectedLayerIds.length > 1 && (
             <>
               <span>·</span>
-              <span className="text-bento-blue">{selectedLayerIds.length} capas seleccionadas</span>
+              <span className="text-bento-blue">{t('{count} capas seleccionadas', { count: selectedLayerIds.length })}</span>
             </>
           )}
         </div>
@@ -1123,23 +1129,23 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
             disabled={!vertexToolbar.canAdd}
             onClick={() => addCurves(vertexToolbar.vertices)}
             className="flex items-center gap-1.5 h-7 px-2 rounded-md text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent"
-            data-tooltip={'Añade tiradores Bézier a los vértices seleccionados\nTambién con doble clic en un vértice'}
+            data-tooltip={t('Añade tiradores Bézier a los vértices seleccionados\nTambién con doble clic en un vértice')}
           >
             <BezierCurve className="w-3.5 h-3.5" />
-            <span>Agregar curva</span>
+            <span>{t('Agregar curva')}</span>
           </button>
           <button
             type="button"
             disabled={!vertexToolbar.canRemove}
             onClick={() => removeCurves(vertexToolbar.vertices)}
             className="flex items-center gap-1.5 h-7 px-2 rounded-md text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent"
-            data-tooltip={'Quita los tiradores Bézier: los vértices vuelven a ser esquinas\nTambién con doble clic en un vértice curvo'}
+            data-tooltip={t('Quita los tiradores Bézier: los vértices vuelven a ser esquinas\nTambién con doble clic en un vértice curvo')}
           >
             <LineSegment className="w-3.5 h-3.5" />
-            <span>Quitar curva</span>
+            <span>{t('Quitar curva')}</span>
           </button>
           <div className="w-px h-5 bg-border mx-1" />
-          <span className="pl-1 pr-0.5">Reflejo</span>
+          <span className="pl-1 pr-0.5">{t('Reflejo')}</span>
           <div className="flex items-center bg-secondary rounded-md p-0.5 gap-0.5">
             {MIRROR_OPTIONS.map((o) => (
               <button
@@ -1152,8 +1158,8 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
                     ? 'bg-card text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
-                data-tooltip={o.mode === 'none' ? `${o.label}\nAlt + arrastrar un tirador lo mueve por separado` : o.label}
-                aria-label={o.label}
+                data-tooltip={o.mode === 'none' ? t('{label}\nAlt + arrastrar un tirador lo mueve por separado', { label: t(o.label) }) : t(o.label)}
+                aria-label={t(o.label)}
               >
                 <MirrorIcon mode={o.mode} />
               </button>
@@ -1168,17 +1174,17 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           onMouseDown={(e) => e.stopPropagation()}
           className="absolute bottom-3 left-3 bg-card/90 border border-border rounded-lg pl-2.5 pr-1 py-1 text-[10px] text-muted-foreground backdrop-blur-sm flex items-center gap-2 font-mono animate-tooltip-in"
         >
-          <span>Espacio + Arrastrar: Desplazar</span>
+          <span>{t('Espacio + Arrastrar: Desplazar')}</span>
           <span>·</span>
-          <span>Ctrl + Rueda: Zoom</span>
+          <span>{t('Ctrl + Rueda: Zoom')}</span>
           <span>·</span>
-          <span>Shift + Clic: Selección múltiple</span>
+          <span>{t('Shift + Clic: Selección múltiple')}</span>
           <button
             type="button"
             onClick={() => toggleHelp(false)}
             className="p-0.5 rounded hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
-            data-tooltip="Ocultar ayuda"
-            aria-label="Ocultar ayuda"
+            data-tooltip={t('Ocultar ayuda')}
+            aria-label={t('Ocultar ayuda')}
           >
             <X className="w-3 h-3" />
           </button>
@@ -1189,8 +1195,8 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => toggleHelp(true)}
           className="absolute bottom-3 left-3 w-6 h-6 rounded-lg bg-card/90 border border-border backdrop-blur-sm flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer animate-tooltip-in"
-          data-tooltip="Mostrar atajos del lienzo"
-          aria-label="Mostrar atajos del lienzo"
+          data-tooltip={t('Mostrar atajos del lienzo')}
+          aria-label={t('Mostrar atajos del lienzo')}
         >
           <Question className="w-3.5 h-3.5" />
         </button>

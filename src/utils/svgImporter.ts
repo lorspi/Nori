@@ -1,6 +1,7 @@
 import { AnimatableProperty, Keyframe, Layer, LayerProperties, LayerType, Project } from '../types/animation';
 import { createDefaultEasing, createTrack } from './animationTracks';
 import { parseColor } from './interpolator';
+import { t } from '../i18n';
 
 /**
  * SVG importer: converts an SVG document into a complete Nori project.
@@ -74,11 +75,11 @@ interface ShapeInfo {
 export function importSvg(svgText: string, fps: number): Promise<SvgImportResult> {
   const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
   if (doc.querySelector('parsererror')) {
-    throw new Error('El archivo SVG no es válido');
+    throw new Error(t('El archivo SVG no es válido'));
   }
   const parsedRoot = doc.documentElement;
   if (parsedRoot.nodeName.toLowerCase() !== 'svg') {
-    throw new Error('El archivo no contiene un elemento <svg>');
+    throw new Error(t('El archivo no contiene un elemento <svg>'));
   }
 
   // Mount off-screen (rendered but invisible) so styles, layout and animations are resolved
@@ -214,7 +215,7 @@ function createShapeInfo(el: SVGGraphicsElement, tag: string, counters: Record<s
     text: 'Texto',
   };
   counters[tag] = (counters[tag] || 0) + 1;
-  const name = el.id || el.getAttribute('inkscape:label') || `${labels[tag]} ${counters[tag]}`;
+  const name = el.id || el.getAttribute('inkscape:label') || `${t(labels[tag])} ${counters[tag]}`;
   const base = { el, name, radius: 0, samples: [] as Sample[] };
 
   switch (tag) {

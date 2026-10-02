@@ -5,6 +5,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
 import { CheckCircle as CheckCircle2, XCircle, Info, Warning as AlertTriangle, X } from '@phosphor-icons/react';
+import { t, useLanguage } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,6 +62,8 @@ export function useUI() {
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function UIProvider({ children }: { children: React.ReactNode }) {
+  // Rendered outside App: re-render the modals here when the language changes
+  useLanguage();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [promptState, setPromptState] = useState<PromptState | null>(null);
@@ -144,17 +147,17 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
   if (toasts.length === 0) return null;
   return (
     <div className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-2 items-end pointer-events-none">
-      {toasts.map(t => {
-        const { icon, classes } = toastConfig[t.type];
+      {toasts.map(item => {
+        const { icon, classes } = toastConfig[item.type];
         return (
           <div
-            key={t.id}
+            key={item.id}
             className={`pointer-events-auto flex items-center gap-2.5 border rounded-xl px-4 py-2.5 shadow-card-hover text-xs font-semibold font-body max-w-xs animate-fade-in ${classes}`}
           >
             {icon}
-            <span className="text-foreground flex-1">{t.message}</span>
+            <span className="text-foreground flex-1">{item.message}</span>
             <button
-              onClick={() => onDismiss(t.id)}
+              onClick={() => onDismiss(item.id)}
               className="ml-1 opacity-50 hover:opacity-100 transition-opacity cursor-pointer text-foreground"
             >
               <X className="w-3.5 h-3.5" />
@@ -175,7 +178,7 @@ function ConfirmModal({
   state: ConfirmState;
   onResponse: (value: boolean | 'neutral') => void;
 }) {
-  const { title, message, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', neutralLabel, variant = 'default' } = state;
+  const { title, message, confirmLabel = t('Confirmar'), cancelLabel = t('Cancelar'), neutralLabel, variant = 'default' } = state;
   const isDanger = variant === 'danger';
 
   return (
@@ -249,7 +252,7 @@ function PromptModal({
   state: PromptState;
   onResponse: (value: string | null) => void;
 }) {
-  const { title, message, placeholder = '', confirmLabel = 'Aceptar', cancelLabel = 'Cancelar', defaultValue = '' } = state;
+  const { title, message, placeholder = '', confirmLabel = t('Aceptar'), cancelLabel = t('Cancelar'), defaultValue = '' } = state;
   const [inputValue, setInputValue] = React.useState(defaultValue);
   const inputRef = React.useRef<HTMLInputElement>(null);
 

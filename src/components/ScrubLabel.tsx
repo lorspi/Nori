@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { t } from '../i18n';
 
 interface ScrubLabelProps {
   value: number;
@@ -72,7 +73,7 @@ export const ScrubLabel: React.FC<ScrubLabelProps> = ({
   return (
     <span
       onPointerDown={handlePointerDown}
-      data-tooltip={title ?? 'Arrastra a los lados para cambiar el valor. Más rápido con'}
+      data-tooltip={title ?? t('Arrastra a los lados para cambiar el valor. Más rápido con')}
       data-shortcut={title ? undefined : 'Shift'}
       className={`cursor-ew-resize touch-none select-none ${className}`}
     >

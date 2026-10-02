@@ -12,6 +12,7 @@ import {
   Lock,
   LockOpen as Unlock,
   Diamond,
+  FolderSimple,
 } from '@phosphor-icons/react';
 import { Project, AnimatableProperty, KeyframeRef, TimelineClipboard } from '../types/animation';
 import {
@@ -31,6 +32,7 @@ import { BOOLEAN_ICONS } from './booleanIcons';
 import { TrackValue } from './TrackValue';
 import { NumberInput } from './NumberInput';
 import { getLayerPropertiesAtTime } from '../utils/interpolator';
+import { t } from '../i18n';
 
 interface TimelineProps {
   project: Project;
@@ -199,7 +201,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   const totalWidth = duration * pixelsPerSecond;
   const selectedKeys = new Set(selectedKeyframes.map(refKey));
 
-  // Rows shown: the shapes of a boolean group appear under it while it is expanded
+  // Rows shown: the layers of a group appear under it while it is expanded
   const rows = project.layers
     .map((layer) => ({ layer, ancestors: getAncestors(project.layers, layer) }))
     .filter(({ ancestors }) => ancestors.every((a) => a.expanded));
@@ -239,7 +241,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       const refId = row.dataset.rowLayer!;
       const r = row.getBoundingClientRect();
       const f = (e.clientY - r.top) / r.height;
-      // Boolean groups: the middle drops inside; an expanded one takes everything below its top edge
+      // Groups: the middle drops inside; an expanded one takes everything below its top edge
       const position: LayerDropPosition =
         row.dataset.rowGroup === 'expanded'
           ? f < 0.3 ? 'before' : 'inside'
@@ -290,8 +292,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     return Math.max(0, Math.min(duration, x / pixelsPerSecond));
   };
 
-  const timeToX = (t: number) => {
-    return t * pixelsPerSecond;
+  const timeToX = (time: number) => {
+    return time * pixelsPerSecond;
   };
 
   // Synchronized scroll handlers: the right container provides the single vertical scrollbar and horizontal scrollbar
@@ -318,8 +320,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     const rect = rulerContainerRef.current.getBoundingClientRect();
     const scrollLeft = tracksContainerRef.current.scrollLeft;
     const clickX = e.clientX - rect.left + scrollLeft;
-    const t = xToTime(clickX);
-    onSeek(Number(t.toFixed(3)));
+    const time = xToTime(clickX);
+    onSeek(Number(time.toFixed(3)));
     setIsScrubbing(true);
   };
 
@@ -470,8 +472,8 @@ export const Timeline: React.FC<TimelineProps> = ({
         const rect = rulerContainerRef.current.getBoundingClientRect();
         const scrollLeft = tracksContainerRef.current.scrollLeft;
         const clickX = e.clientX - rect.left + scrollLeft;
-        const t = xToTime(clickX);
-        onSeek(Number(t.toFixed(3)));
+        const time = xToTime(clickX);
+        onSeek(Number(time.toFixed(3)));
       }
 
       const drag = keyframeDragRef.current;
@@ -613,27 +615,27 @@ export const Timeline: React.FC<TimelineProps> = ({
     const count = m.refs.length;
     const pasteCount = getBarGroup(m.layerId).length;
     const items: ContextMenuItem[] = [
-      { label: 'Animaciones predeterminadas…', onSelect: () => onOpenAnimationPresets(m.layerId) },
+      { label: t('Animaciones predeterminadas…'), onSelect: () => onOpenAnimationPresets(m.layerId) },
       'separator',
     ];
 
     if (m.kind === 'keyframe') {
       items.push({
-        label: count === 1 ? 'Copiar fotograma clave' : `Copiar ${count} fotogramas clave`,
+        label: count === 1 ? t('Copiar fotograma clave') : t('Copiar {count} fotogramas clave', { count }),
         shortcut: 'Ctrl+C',
         onSelect: () => onCopyKeyframes(m.refs),
       });
     }
     if (m.kind !== 'keyframe') {
       items.push({
-        label: 'Copiar animación de la capa',
+        label: t('Copiar animación de la capa'),
         disabled: !hasAnimation,
         onSelect: () => onCopyLayerAnimation(m.layerId),
       });
     }
     if (m.kind === 'bar') {
       items.push({
-        label: `Copiar ${count} fotogramas clave`,
+        label: t('Copiar {count} fotogramas clave', { count }),
         shortcut: 'Ctrl+C',
         onSelect: () => onCopyKeyframes(m.refs),
       });
@@ -643,11 +645,11 @@ export const Timeline: React.FC<TimelineProps> = ({
       label:
         clipboardKind === 'layer'
           ? pasteCount > 1
-            ? `Pegar animación en ${pasteCount} capas`
-            : 'Pegar animación en esta capa'
+            ? t('Pegar animación en {count} capas', { count: pasteCount })
+            : t('Pegar animación en esta capa')
           : pasteCount > 1
-            ? `Pegar fotogramas clave en ${pasteCount} capas`
-            : 'Pegar fotogramas clave en el tiempo actual',
+            ? t('Pegar fotogramas clave en {count} capas', { count: pasteCount })
+            : t('Pegar fotogramas clave en el tiempo actual'),
       shortcut: 'Ctrl+V',
       disabled: !clipboardKind,
       onSelect: () => onPaste(m.layerId),
@@ -655,8 +657,8 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     if (count > 0) {
       items.push('separator', {
-        label: count === 1 ? 'Eliminar fotograma clave' : `Eliminar ${count} fotogramas clave`,
-        shortcut: 'Supr',
+        label: count === 1 ? t('Eliminar fotograma clave') : t('Eliminar {count} fotogramas clave', { count }),
+        shortcut: t('Supr'),
         danger: true,
         onSelect: () => onDeleteKeyframes(m.refs),
       });
@@ -671,14 +673,14 @@ export const Timeline: React.FC<TimelineProps> = ({
     const count = Math.ceil(duration / step);
 
     for (let i = 0; i <= count; i++) {
-      const t = i * step;
-      if (t > duration) break;
-      const x = timeToX(t);
-      const isWhole = Number.isInteger(t);
+      const time = i * step;
+      if (time > duration) break;
+      const x = timeToX(time);
+      const isWhole = Number.isInteger(time);
 
       ticks.push(
         <div
-          key={t}
+          key={time}
           style={{ left: `${x}px` }}
           className="absolute top-0 bottom-0 pointer-events-none"
         >
@@ -689,7 +691,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           />
           {isWhole && (
             <span className="absolute top-3 -translate-x-1/2 text-[10px] font-mono text-muted-foreground select-none">
-              {t}s
+              {time}s
             </span>
           )}
         </div>
@@ -732,7 +734,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             // ignore
           }
         }}
-        data-tooltip={"Arrastra para cambiar la altura de la línea del tiempo\nDoble clic para restablecerla"}
+        data-tooltip={t("Arrastra para cambiar la altura de la línea del tiempo\nDoble clic para restablecerla")}
         className={`absolute -top-1 left-0 right-0 h-2 z-40 cursor-row-resize transition-colors ${
           isResizing ? 'bg-bento-blue/50' : 'hover:bg-bento-blue/30'
         }`}
@@ -745,7 +747,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           <button
             onClick={() => onSeek(0)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            data-tooltip="Ir al inicio"
+            data-tooltip={t('Ir al inicio')}
             data-shortcut="Shift+F"
           >
             <SkipBack className="w-3.5 h-3.5" />
@@ -753,7 +755,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           <button
             onClick={() => onSeekKeyframe(-1)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex items-center"
-            data-tooltip="Ir al fotograma clave anterior"
+            data-tooltip={t('Ir al fotograma clave anterior')}
             data-shortcut="Ctrl+F"
           >
             <ChevronLeft weight="bold" className="w-2.5 h-2.5 -mr-0.5" />
@@ -762,7 +764,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           <button
             onClick={() => stepFrame(false)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            data-tooltip="Fotograma anterior"
+            data-tooltip={t('Fotograma anterior')}
             data-shortcut="F"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
@@ -770,15 +772,15 @@ export const Timeline: React.FC<TimelineProps> = ({
           <button
             onClick={onTogglePlay}
             className="p-1.5 rounded-md bg-bento-blue text-white hover:bg-bento-blue/90 transition-colors shadow-sm"
-            data-tooltip={isPlaying ? 'Pausar' : 'Reproducir'}
-            data-shortcut="Espacio"
+            data-tooltip={isPlaying ? t('Pausar') : t('Reproducir')}
+            data-shortcut={t('Espacio')}
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play weight="fill" className="w-3.5 h-3.5" />}
           </button>
           <button
             onClick={() => stepFrame(true)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            data-tooltip="Fotograma siguiente"
+            data-tooltip={t('Fotograma siguiente')}
             data-shortcut="G"
           >
             <ChevronRight className="w-3.5 h-3.5" />
@@ -786,7 +788,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           <button
             onClick={() => onSeekKeyframe(1)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex items-center"
-            data-tooltip="Ir al fotograma clave siguiente"
+            data-tooltip={t('Ir al fotograma clave siguiente')}
             data-shortcut="Ctrl+G"
           >
             <Diamond className="w-3 h-3" />
@@ -795,7 +797,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           <button
             onClick={() => onSeek(duration)}
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            data-tooltip="Ir al final"
+            data-tooltip={t('Ir al final')}
             data-shortcut="Shift+G"
           >
             <SkipForward className="w-3.5 h-3.5" />
@@ -804,7 +806,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           {/* Current time: type a time and press Enter to go there */}
           <label
             className="ml-3 flex items-center gap-1 px-2 py-0.5 rounded-md bg-bento-blue/15 border border-bento-blue/30 text-bento-blue font-mono font-medium text-xs focus-within:border-bento-blue cursor-text"
-            data-tooltip="Escribe un tiempo y pulsa Enter para ir a él"
+            data-tooltip={t('Escribe un tiempo y pulsa Enter para ir a él')}
           >
             <NumberInput
               value={currentTime}
@@ -815,7 +817,7 @@ export const Timeline: React.FC<TimelineProps> = ({
               commitOnBlur
               onChange={(time) => onSeek(snapToFrame(time, project.fps))}
               onFocus={(e) => e.currentTarget.select()}
-              aria-label="Tiempo actual (segundos)"
+              aria-label={t('Tiempo actual (segundos)')}
               className="w-11 bg-transparent text-right focus:outline-none"
             />
             <span>s</span>
@@ -823,14 +825,14 @@ export const Timeline: React.FC<TimelineProps> = ({
 
           {selectedKeyframes.length > 1 && (
             <span className="ml-2 text-[10px] text-muted-foreground">
-              {selectedKeyframes.length} fotogramas clave seleccionados
+              {t('{count} fotogramas clave seleccionados', { count: selectedKeyframes.length })}
             </span>
           )}
         </div>
 
         {/* Timeline Zoom Slider with Ctrl+wheel hint */}
         <div className="flex items-center gap-2 text-muted-foreground">
-          <span className="text-[10px]">Zoom</span>
+          <span className="text-[10px]">{t('Zoom')}</span>
           <input
             type="range"
             min="30"
@@ -838,7 +840,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             value={pixelsPerSecond}
             onChange={(e) => setPixelsPerSecond(Number(e.target.value))}
             className="w-20 accent-bento-blue h-1 bg-muted rounded-md cursor-pointer"
-            data-tooltip="Zoom de la línea del tiempo. También con la rueda del ratón y"
+            data-tooltip={t('Zoom de la línea del tiempo. También con la rueda del ratón y')}
             data-shortcut="Ctrl"
           />
           <span className="text-[9px] font-mono text-muted-foreground w-8 text-right">
@@ -851,7 +853,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       <div className="h-7 shrink-0 border-b border-border bg-card flex items-center">
         {/* Left Column Header */}
         <div className="w-64 shrink-0 h-full border-r border-border bg-card px-3 flex items-center justify-between text-muted-foreground text-[10px] uppercase font-semibold">
-          <span>Capas y Propiedades</span>
+          <span>{t('Capas y Propiedades')}</span>
           <span>{project.layers.length}</span>
         </div>
 
@@ -893,7 +895,8 @@ export const Timeline: React.FC<TimelineProps> = ({
           <div className="divide-y divide-border">
             {rows.map(({ layer, ancestors }) => {
               const isSelected = selectedLayerIds.includes(layer.id);
-              const hasChildren = layer.type === 'boolean' && project.layers.some((l) => l.parentId === layer.id);
+              const isGroup = layer.type === 'boolean' || layer.type === 'group';
+              const hasChildren = isGroup && project.layers.some((l) => l.parentId === layer.id);
               const canExpand = layer.tracks.length > 0 || hasChildren;
               const BooleanIcon = layer.type === 'boolean' ? BOOLEAN_ICONS[layer.booleanOp ?? 'union'] : null;
               // A shape inside a hidden group isn't drawn either
@@ -908,7 +911,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                       dragging it changes its place in the stacking order) */}
                   <div
                     data-row-layer={layer.id}
-                    data-row-group={layer.type === 'boolean' ? (hasChildren && layer.expanded ? 'expanded' : 'collapsed') : undefined}
+                    data-row-group={isGroup ? (hasChildren && layer.expanded ? 'expanded' : 'collapsed') : undefined}
                     onMouseDown={(e) => {
                       if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
                       rowDragRef.current = { layerId: layer.id, startX: e.clientX, startY: e.clientY, active: false };
@@ -939,7 +942,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                         className={`p-0.5 text-muted-foreground hover:text-foreground ${
                           !canExpand ? 'invisible' : ''
                         }`}
-                        data-tooltip={hasChildren ? 'Mostrar las formas del grupo y sus parámetros animados' : 'Mostrar parámetros animados'}
+                        data-tooltip={hasChildren ? t('Mostrar las capas del grupo y sus parámetros animados') : t('Mostrar parámetros animados')}
                       >
                         {layer.expanded ? (
                           <ChevronDown className="w-3 h-3" />
@@ -978,10 +981,13 @@ export const Timeline: React.FC<TimelineProps> = ({
                         )}
                       </button>
 
+                      {layer.type === 'group' && (
+                        <FolderSimple className="w-3.5 h-3.5 shrink-0 text-bento-blue" data-tooltip={t('Grupo')} />
+                      )}
                       {BooleanIcon && (
                         <BooleanIcon
                           className="w-3.5 h-3.5 shrink-0 text-bento-blue"
-                          data-tooltip={`Grupo booleano: ${BOOLEAN_LABELS[layer.booleanOp ?? 'union'].name}`}
+                          data-tooltip={t('Grupo booleano: {name}', { name: t(BOOLEAN_LABELS[layer.booleanOp ?? 'union'].name) })}
                         />
                       )}
                       <span className={`truncate text-xs ${hiddenByGroup ? 'opacity-50' : ''}`}>{layer.name}</span>
@@ -999,8 +1005,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                             (k) => Math.abs(k.time - frameTime) < frameTolerance(project.fps)
                           );
                           const label = isAnimatableProperty(track.property)
-                            ? PROPERTY_META[track.property].label
-                            : track.label;
+                            ? t(PROPERTY_META[track.property].label)
+                            : t(track.label);
   
                           return (
                             <div
@@ -1032,8 +1038,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                                   }`}
                                   data-tooltip={
                                     hasKeyframeAtCurrent
-                                      ? 'Quitar fotograma clave en el tiempo actual'
-                                      : 'Añadir fotograma clave en el tiempo actual'
+                                      ? t('Quitar fotograma clave en el tiempo actual')
+                                      : t('Añadir fotograma clave en el tiempo actual')
                                   }
                                 >
                                   <Diamond
@@ -1109,7 +1115,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                           }`}
                           onMouseDown={(e) => handleLayerBarMouseDown(e, layer.id)}
                           onContextMenu={(e) => handleBarContextMenu(e, layer.id)}
-                          data-tooltip={"Arrastra para mover todos los fotogramas clave de la capa\nArrastra un extremo para estirar o encoger la animación\nShift o Ctrl + clic para seleccionar varias barras\nClic derecho para copiar o pegar"}
+                          data-tooltip={t("Arrastra para mover todos los fotogramas clave de la capa\nArrastra un extremo para estirar o encoger la animación\nShift o Ctrl + clic para seleccionar varias barras\nClic derecho para copiar o pegar")}
                         >
                           {/* Ends: stretch the animation, spreading the keyframes proportionally */}
                           {range.end > range.start &&
@@ -1120,8 +1126,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 className={`absolute top-0 bottom-0 ${side === 'start' ? 'left-0' : 'right-0'} w-1.75 cursor-ew-resize flex items-center justify-center`}
                                 data-tooltip={
                                   side === 'start'
-                                    ? 'Arrastra para estirar la animación desde el principio'
-                                    : 'Arrastra para estirar la animación desde el final'
+                                    ? t('Arrastra para estirar la animación desde el principio')
+                                    : t('Arrastra para estirar la animación desde el final')
                                 }
                               >
                                 <div
@@ -1132,10 +1138,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                               </div>
                             ))}
                           {/* Keyframe summary marks */}
-                          {getLayerKeyframeTimes(layer).map((t) => (
+                          {getLayerKeyframeTimes(layer).map((time) => (
                             <div
-                              key={t}
-                              style={{ left: `${timeToX(t) - barStartX + barPadding}px` }}
+                              key={time}
+                              style={{ left: `${timeToX(time) - barStartX + barPadding}px` }}
                               className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 rotate-45 pointer-events-none ${
                                 isSelected ? 'bg-white' : 'bg-bento-blue'
                               }`}
@@ -1196,7 +1202,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                                     ? 'bg-white border-2 border-bento-blue shadow-md shadow-bento-blue/50'
                                     : 'bg-bento-blue border border-white'
                                 }`}
-                                data-tooltip={`Tiempo: ${kf.time.toFixed(2)}s | Valor: ${String(kf.value).length > 32 ? `${String(kf.value).slice(0, 32)}…` : kf.value}\nArrastrar para mover · Shift o Ctrl + clic para selección múltiple · Doble clic para borrar`}
+                                data-tooltip={t('Tiempo: {time}s | Valor: {value}\nArrastrar para mover · Shift o Ctrl + clic para selección múltiple · Doble clic para borrar', {
+                                  time: kf.time.toFixed(2),
+                                  value: String(kf.value).length > 32 ? `${String(kf.value).slice(0, 32)}…` : String(kf.value),
+                                })}
                               />
                             );
                           })}

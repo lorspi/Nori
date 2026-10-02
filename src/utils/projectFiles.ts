@@ -1,6 +1,7 @@
 import { Project } from '../types/animation';
 import { isLottieJson, convertLottieToProject } from './lottieImporter';
 import { convertSvgToProject } from './svgImporter';
+import { t } from '../i18n';
 
 /** A project read from a file, with the message shown once it opens */
 export interface ImportedProject {
@@ -27,14 +28,17 @@ export function parseProjectJson(text: string, fileName: string): ImportedProjec
   try {
     parsed = JSON.parse(text);
   } catch (err: any) {
-    throw new Error(`Error al procesar el archivo JSON: ${err?.message || 'Formato no válido'}`);
+    throw new Error(t('Error al procesar el archivo JSON: {error}', { error: err?.message || t('Formato no válido') }));
   }
 
   if (isLottieJson(parsed)) {
     const converted = convertLottieToProject(parsed);
     return {
       project: converted,
-      message: `¡Animación Lottie importada con éxito! (${converted.layers.length} capas, ${converted.duration}s)`,
+      message: t('¡Animación Lottie importada con éxito! ({count} capas, {duration}s)', {
+        count: converted.layers.length,
+        duration: converted.duration,
+      }),
     };
   }
 
@@ -49,10 +53,10 @@ export function parseProjectJson(text: string, fileName: string): ImportedProjec
       backgroundColor: parsed.backgroundColor || '#121316',
       layers: parsed.layers,
     };
-    return { project, message: `¡Proyecto cargado con éxito! (${project.title})` };
+    return { project, message: t('¡Proyecto cargado con éxito! ({title})', { title: project.title }) };
   }
 
-  throw new Error('El archivo JSON no tiene un formato compatible de Lottie ni de Nori.');
+  throw new Error(t('El archivo JSON no tiene un formato compatible de Lottie ni de Nori.'));
 }
 
 /** An SVG as a complete project (animated SVGs bring their tracks to the timeline) */
@@ -62,17 +66,21 @@ export async function importSvgProject(svgText: string, fileName: string): Promi
   try {
     converted = await convertSvgToProject(svgText, title);
   } catch (err: any) {
-    throw new Error(`No se pudo importar el SVG: ${err?.message || 'formato no válido'}`);
+    throw new Error(t('No se pudo importar el SVG: {error}', { error: err?.message || t('formato no válido') }));
   }
   const { project, result } = converted;
-  if (project.layers.length === 0) throw new Error('El SVG no contiene formas que se puedan importar');
+  if (project.layers.length === 0) throw new Error(t('El SVG no contiene formas que se puedan importar'));
 
-  const skipped = result.skipped > 0 ? ` · ${result.skipped} elementos no compatibles omitidos` : '';
+  const skipped = result.skipped > 0 ? t(' · {count} elementos no compatibles omitidos', { count: result.skipped }) : '';
   return {
     project,
     message: result.animated
-      ? `SVG animado importado: ${project.layers.length} capas, ${project.duration}s${skipped}`
-      : `SVG importado: ${project.layers.length} capas${skipped}`,
+      ? t('SVG animado importado: {count} capas, {duration}s{skipped}', {
+          count: project.layers.length,
+          duration: project.duration,
+          skipped,
+        })
+      : t('SVG importado: {count} capas{skipped}', { count: project.layers.length, skipped }),
   };
 }
 
@@ -85,7 +93,7 @@ export async function importFigmaProject(svgText: string): Promise<ImportedProje
   try {
     converted = await convertSvgToProject(svgText, 'figma_frame');
   } catch (err: any) {
-    throw new Error(`No se pudo importar el frame: ${err?.message || 'formato no válido'}`);
+    throw new Error(t('No se pudo importar el frame: {error}', { error: err?.message || t('formato no válido') }));
   }
   let project = converted.project;
   const [first] = project.layers;
@@ -109,12 +117,20 @@ export async function importFigmaProject(svgText: string): Promise<ImportedProje
     project = { ...project, backgroundColor: p.fill, layers: project.layers.slice(1) };
   }
   if (project.layers.length === 0 && !isFrameBackground) {
-    throw new Error('El frame no contiene formas que se puedan importar');
+    throw new Error(t('El frame no contiene formas que se puedan importar'));
   }
-  const skipped = converted.result.skipped > 0 ? ` · ${converted.result.skipped} elementos no compatibles omitidos` : '';
+  const skipped =
+    converted.result.skipped > 0
+      ? t(' · {count} elementos no compatibles omitidos', { count: converted.result.skipped })
+      : '';
   return {
     project,
-    message: `Frame de Figma importado: ${project.layers.length} capas, ${project.width} × ${project.height} px${skipped}`,
+    message: t('Frame de Figma importado: {count} capas, {width} × {height} px{skipped}', {
+      count: project.layers.length,
+      width: project.width,
+      height: project.height,
+      skipped,
+    }),
   };
 }
 
@@ -125,7 +141,11 @@ export async function importProjectFile(file: File): Promise<ImportedProject> {
     return importSvgProject(await file.text(), file.name);
   }
   if (!name.endsWith('.json')) {
-    throw new Error(`"${file.name}" no es un archivo compatible: usa un proyecto de Nori o una animación Lottie (.json), o un .svg`);
+    throw new Error(
+      t('"{name}" no es un archivo compatible: usa un proyecto de Nori o una animación Lottie (.json), o un .svg', {
+        name: file.name,
+      })
+    );
   }
   return parseProjectJson(await file.text(), file.name);
 }
