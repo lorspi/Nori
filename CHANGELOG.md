@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.2.1] — 2026-10-02
+
+### Added
+
+- **Carpetas de proyectos**
+  Los proyectos se pueden agrupar en carpetas. Las carpetas aparecen en la barra lateral, debajo de Proyectos, con el número de proyectos que contienen y, al pasar el cursor, botones para renombrarlas o eliminarlas. En Inicio se muestran como tarjetas más bajas encima de la cuadrícula de proyectos. Un proyecto se mueve a una carpeta arrastrándolo sobre ella, ya sea la tarjeta o la carpeta de la barra lateral; para sacarlo se arrastra a "Proyectos" en la barra lateral o a "Inicio" en la parte de arriba, o se elige "Sacar de la carpeta" en su menú. Los proyectos que se crean o importan con una carpeta abierta se guardan en ella (también al arrastrar un archivo .json o .svg a la ventana), y al duplicar un proyecto la copia queda en la misma carpeta. Si se elimina una carpeta, sus proyectos pasan a la raíz de Inicio; no se borra ninguno.
+
+- **Respaldo del espacio de trabajo**
+  Una nueva sección, Respaldo, en la parte de abajo de la barra lateral (encima de Acerca de Nori), sirve para pasar todo el espacio de trabajo a otro navegador o equipo. "Crear respaldo" descarga un archivo .zip con todos los proyectos (también los de la papelera) y las carpetas; dentro, cada proyecto es un JSON de Nori que también se puede abrir por separado. "Cargar respaldo" lee ese archivo y deja elegir entre mantener lo que ya hay y añadir el contenido del respaldo (lo que ya estaba igual no se duplica) o reemplazar todo el espacio de trabajo, esto último con una confirmación previa. Si el navegador no tiene espacio suficiente, no se cambia nada. La página explica por qué conviene tener siempre un respaldo reciente, ya sea completo o descargando el JSON de cada proyecto, y muestra cuándo se creó el último respaldo en ese navegador.
+
+- **Renombrar la carpeta desde su título**
+  Dentro de una carpeta, su nombre en el título se puede editar con un clic, igual que el nombre del proyecto en el editor: Enter o salir del campo guarda el cambio y Escape lo descarta.
+
+### Changed
+
+- **Ruta completa en el editor**
+  Si el proyecto está en una carpeta, la barra superior del editor muestra la ruta completa: Inicio / Carpeta / Proyecto. Un clic en la carpeta abre esa carpeta en Inicio.
+
+- **Nori vuelve a la última pantalla**
+  Al cargar o recargar la página se abre la pantalla en la que lo dejaste: el proyecto que estabas editando o Inicio, en la misma sección (Proyectos, una carpeta, Papelera, Respaldo o Acerca de Nori). La primera vez que se abre Nori sigue cargando el proyecto de ejemplo.
+
+- **Botones de Inicio**
+  "Nuevo proyecto" pasa a llamarse "Crear" y abre un menú con Proyecto en blanco, Proyecto de ejemplo y Carpeta; Proyecto de ejemplo deja de tener su propio botón. Importar SVG, Código SVG e Importar desde Figma se reúnen en un menú "Importar". Cada opción explica qué hace debajo de su nombre.
+
+- **Orden de los proyectos**
+  En Inicio y dentro de cada carpeta, los proyectos se ordenan por la fecha de su última edición, primero el más reciente. Las carpetas se ordenan por nombre.
+
 ## [1.2.0] — 2026-10-01
 
 ### Added

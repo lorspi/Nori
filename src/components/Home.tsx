@@ -20,14 +20,23 @@ import {
   ArrowCounterClockwise,
   DownloadSimple,
   X,
+  Plus,
+  File,
+  FolderSimplePlus,
+  FolderSimple,
+  CaretRight,
+  PencilSimple,
+  Archive,
 } from '@phosphor-icons/react';
 import { Project } from '../types/animation';
 import { useUI } from '../lib/ui';
 import { useUpdateCheck } from '../hooks/useVersion';
 import {
+  FolderMeta,
   ProjectMeta,
   listProjects,
   listTrashedProjects,
+  listFolders,
   loadProject,
   renameProject,
   duplicateProject,
@@ -36,6 +45,12 @@ import {
   deleteProjectForever,
   emptyTrash,
   getStorageUsage,
+  createFolder,
+  renameFolder,
+  deleteFolder,
+  moveProjectToFolder,
+  getLastView,
+  setLastView,
 } from '../utils/projectStorage';
 import {
   ImportedProject,
@@ -53,8 +68,16 @@ import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { ExportModal } from './ExportModal';
 import { PasteSvgModal } from './PasteSvgModal';
 import { FigmaImportModal } from './FigmaImportModal';
+import { MenuButton, MenuButtonItem } from './MenuButton';
+import { BackupSection } from './BackupSection';
 
-type Section = 'projects' | 'trash' | 'about';
+type Section = 'projects' | 'trash' | 'backup' | 'about';
+
+// Drop target while a project card is dragged: a folder id, or the root of Inicio
+type DropTarget = string | typeof ROOT_TARGET;
+const ROOT_TARGET = '__root__';
+// dataTransfer type that marks the drag of a project card (not a file from the system)
+const PROJECT_DRAG_TYPE = 'application/x-nori-project';
 
 // Space browsers usually give each site in localStorage (in characters)
 const STORAGE_QUOTA = 5 * 1024 * 1024;
@@ -93,16 +116,28 @@ function formatSize(chars: number): string {
 
 interface HomeProps {
   onOpenProject: (id: string) => void;
-  /** Stores a new project and opens it */
-  onCreateProject: (project: Project, message: string, autoplay?: boolean) => void;
+  /** Stores a new project (inside the given folder, if any) and opens it */
+  onCreateProject: (project: Project, message: string, autoplay?: boolean, folderId?: string | null) => void;
 }
 
 export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
   const { toast, confirm, prompt } = useUI();
   const { updateAvailable } = useUpdateCheck();
-  const [section, setSection] = useState<Section>('projects');
+  // Inicio reopens on the section and folder it was left on
+  const [initialView] = useState(() => {
+    const view = getLastView();
+    return view?.screen === 'home' ? view : null;
+  });
+  const [section, setSection] = useState<Section>(initialView?.section ?? 'projects');
+  // Folder open in the projects section (null: the root of Inicio)
+  const [folderId, setFolderId] = useState<string | null>(initialView?.folderId ?? null);
+
+  useEffect(() => {
+    setLastView({ screen: 'home', section, folderId });
+  }, [section, folderId]);
   const [projects, setProjects] = useState<ProjectMeta[]>(listProjects);
   const [trashed, setTrashed] = useState<ProjectMeta[]>(listTrashedProjects);
+  const [folders, setFolders] = useState<FolderMeta[]>(listFolders);
   const [usage, setUsage] = useState<number>(getStorageUsage);
   const [warningDismissed, setWarningDismissed] = useState<boolean>(readWarningDismissed);
 
@@ -116,8 +151,40 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
   const refresh = useCallback(() => {
     setProjects(listProjects());
     setTrashed(listTrashedProjects());
+    setFolders(listFolders());
     setUsage(getStorageUsage());
   }, []);
+
+  const folderIds = useMemo(() => new Set(folders.map((f) => f.id)), [folders]);
+  const currentFolder = folderId ? folders.find((f) => f.id === folderId) ?? null : null;
+
+  // The open folder was deleted (here or in another tab): back to the root
+  useEffect(() => {
+    if (folderId && !folderIds.has(folderId)) setFolderId(null);
+  }, [folderId, folderIds]);
+
+  // Projects whose folder no longer exists are shown at the root
+  const folderOf = useCallback(
+    (meta: ProjectMeta) => (meta.folderId && folderIds.has(meta.folderId) ? meta.folderId : null),
+    [folderIds]
+  );
+  const visibleProjects = useMemo(
+    () => projects.filter((m) => folderOf(m) === (currentFolder?.id ?? null)),
+    [projects, currentFolder, folderOf]
+  );
+  const folderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    projects.forEach((m) => {
+      const id = folderOf(m);
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+    });
+    return counts;
+  }, [projects, folderOf]);
+
+  const openFolder = (id: string | null) => {
+    setSection('projects');
+    setFolderId(id);
+  };
 
   // Projects changed from another tab
   useEffect(() => {
@@ -162,10 +229,13 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
   const [isPasteSvgOpen, setIsPasteSvgOpen] = useState(false);
   const [isFigmaImportOpen, setIsFigmaImportOpen] = useState(false);
 
+  // New and imported projects go into the open folder
+  const targetFolderId = section === 'projects' ? currentFolder?.id ?? null : null;
+
   const runImport = async (load: () => Promise<ImportedProject>) => {
     try {
       const { project, message } = await load();
-      onCreateProject(project, message);
+      onCreateProject(project, message, false, targetFolderId);
     } catch (err: any) {
       toast(err?.message || 'No se pudo importar el archivo', 'error');
     }
@@ -177,45 +247,180 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     if (file) runImport(() => importProjectFile(file));
   };
 
-  const actions: { label: string; desc: string; Icon: React.ElementType; onClick: () => void; primary?: boolean }[] = [
+  const createItems: MenuButtonItem[] = [
     {
-      label: 'Nuevo proyecto',
-      desc: 'Lienzo en blanco de 960 × 540',
+      label: 'Proyecto en blanco',
+      description: 'Lienzo en blanco de 960 × 540',
       Icon: FilePlus,
-      primary: true,
-      onClick: () => onCreateProject(createBlankProject(), 'Nuevo proyecto en blanco creado'),
-    },
-    {
-      label: 'Abrir JSON / Lottie',
-      desc: 'Proyecto de Nori o animación Lottie',
-      Icon: FolderOpen,
-      onClick: () => jsonInputRef.current?.click(),
-    },
-    {
-      label: 'Importar SVG',
-      desc: 'Si es animado, sus animaciones pasan a la línea del tiempo',
-      Icon: FileSvg,
-      onClick: () => svgInputRef.current?.click(),
-    },
-    {
-      label: 'Código SVG',
-      desc: 'Pegar el código de un SVG',
-      Icon: ClipboardText,
-      onClick: () => setIsPasteSvgOpen(true),
-    },
-    {
-      label: 'Importar desde Figma',
-      desc: 'Un frame copiado como SVG',
-      Icon: FigmaLogo,
-      onClick: () => setIsFigmaImportOpen(true),
+      onSelect: () => onCreateProject(createBlankProject(), 'Nuevo proyecto en blanco creado', false, targetFolderId),
     },
     {
       label: 'Proyecto de ejemplo',
-      desc: 'La animación del logo de Nori',
+      description: 'La animación del logo de Nori',
       Icon: NoriLogo,
-      onClick: () => onCreateProject(JSON.parse(JSON.stringify(NORI_INTRO_PROJECT)), 'Proyecto de ejemplo abierto', true),
+      onSelect: () =>
+        onCreateProject(
+          JSON.parse(JSON.stringify(NORI_INTRO_PROJECT)),
+          'Proyecto de ejemplo abierto',
+          true,
+          targetFolderId
+        ),
+    },
+    {
+      label: 'Carpeta',
+      description: 'Para agrupar proyectos; arrastra los proyectos sobre ella',
+      Icon: FolderSimplePlus,
+      separatorBefore: true,
+      onSelect: () => handleCreateFolder(),
     },
   ];
+
+  const importItems: MenuButtonItem[] = [
+    {
+      label: 'Importar SVG',
+      description: 'Si es animado, sus animaciones pasan a la línea del tiempo',
+      Icon: FileSvg,
+      onSelect: () => svgInputRef.current?.click(),
+    },
+    {
+      label: 'Código SVG',
+      description: 'Pegar el código de un SVG',
+      Icon: ClipboardText,
+      onSelect: () => setIsPasteSvgOpen(true),
+    },
+    {
+      label: 'Importar desde Figma',
+      description: 'Un frame copiado como SVG',
+      Icon: FigmaLogo,
+      onSelect: () => setIsFigmaImportOpen(true),
+    },
+  ];
+
+  // ── Folders ─────────────────────────────────────────────────────────────────
+  const [folderMenu, setFolderMenu] = useState<{ x: number; y: number; folder: FolderMeta } | null>(null);
+  const closeFolderMenu = useCallback(() => setFolderMenu(null), []);
+
+  const handleCreateFolder = async () => {
+    const name = (await prompt({
+      title: 'Nueva carpeta',
+      placeholder: 'Nombre de la carpeta',
+      defaultValue: 'Nueva carpeta',
+      confirmLabel: 'Crear',
+    }))?.trim();
+    if (!name) return;
+    const folder = createFolder(name.slice(0, 60));
+    if (!folder) {
+      toast('No se pudo crear la carpeta (espacio insuficiente en el navegador)', 'error');
+      return;
+    }
+    refresh();
+    toast(`Carpeta "${folder.name}" creada`, 'success');
+  };
+
+  const handleRenameFolder = async (folder: FolderMeta) => {
+    const name = (await prompt({
+      title: 'Renombrar carpeta',
+      defaultValue: folder.name,
+      confirmLabel: 'Renombrar',
+    }))?.trim();
+    if (!name || name === folder.name) return;
+    if (renameFolder(folder.id, name.slice(0, 60))) {
+      refresh();
+      toast(`Carpeta renombrada a "${name}"`, 'success');
+    } else {
+      toast('No se pudo renombrar la carpeta', 'error');
+    }
+  };
+
+  const handleDeleteFolder = async (folder: FolderMeta) => {
+    const count = folderCounts.get(folder.id) ?? 0;
+    const ok = await confirm({
+      title: 'Eliminar carpeta',
+      message:
+        count > 0
+          ? `¿Eliminar la carpeta "${folder.name}"? ${count === 1 ? 'El proyecto que contiene pasará' : `Los ${count} proyectos que contiene pasarán`} a la raíz de Inicio; no se borra ningún proyecto.`
+          : `¿Eliminar la carpeta "${folder.name}"? Está vacía.`,
+      confirmLabel: 'Eliminar carpeta',
+      variant: 'danger',
+    });
+    if (ok !== true) return;
+    if (!deleteFolder(folder.id)) {
+      toast('No se pudo eliminar la carpeta', 'error');
+      return;
+    }
+    refresh();
+    toast(`Carpeta "${folder.name}" eliminada`, 'success');
+  };
+
+  const buildFolderMenuItems = (folder: FolderMeta): ContextMenuItem[] => [
+    { label: 'Abrir', onSelect: () => openFolder(folder.id) },
+    { label: 'Renombrar…', onSelect: () => handleRenameFolder(folder) },
+    'separator',
+    { label: 'Eliminar carpeta', danger: true, onSelect: () => handleDeleteFolder(folder) },
+  ];
+
+  // ── Dragging projects into folders ──────────────────────────────────────────
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+
+  const moveProject = (id: string, target: DropTarget) => {
+    const meta = projects.find((m) => m.id === id);
+    if (!meta) return;
+    const nextFolder = target === ROOT_TARGET ? null : target;
+    if (folderOf(meta) === nextFolder) return;
+    if (!moveProjectToFolder(id, nextFolder)) {
+      toast('No se pudo mover el proyecto', 'error');
+      return;
+    }
+    refresh();
+    const folder = nextFolder ? folders.find((f) => f.id === nextFolder) : null;
+    toast(folder ? `"${meta.title}" se movió a "${folder.name}"` : `"${meta.title}" se movió a la raíz de Inicio`, 'success');
+  };
+
+  /** Props that turn an element into a place where a project card can be dropped */
+  const dropZone = (target: DropTarget) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes(PROJECT_DRAG_TYPE)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dropTarget !== target) setDropTarget(target);
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+      setDropTarget((prev) => (prev === target ? null : prev));
+    },
+    onDrop: (e: React.DragEvent) => {
+      const id = e.dataTransfer.getData(PROJECT_DRAG_TYPE);
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDropTarget(null);
+      setDraggedId(null);
+      moveProject(id, target);
+    },
+  });
+
+  const projectDrag = (meta: ProjectMeta) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData(PROJECT_DRAG_TYPE, meta.id);
+      e.dataTransfer.setData('text/plain', meta.title);
+      setDraggedId(meta.id);
+    },
+    onDragEnd: () => {
+      setDraggedId(null);
+      setDropTarget(null);
+    },
+  });
+
+  // Highlight of a drop zone while a project is dragged over it
+  const dropClass = (target: DropTarget) =>
+    draggedId && dropTarget === target
+      ? target === ROOT_TARGET
+        ? 'bg-bento-orange/10 ring-1 ring-bento-orange/40'
+        : 'bg-bento-yellow/10 ring-1 ring-bento-yellow/50'
+      : '';
 
   // ── Project actions ─────────────────────────────────────────────────────────
   const [menu, setMenu] = useState<{ x: number; y: number; meta: ProjectMeta } | null>(null);
@@ -269,6 +474,9 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     'separator',
     { label: 'Renombrar…', onSelect: () => handleRename(meta) },
     { label: 'Duplicar', onSelect: () => handleDuplicate(meta) },
+    ...(folderOf(meta)
+      ? [{ label: 'Sacar de la carpeta', onSelect: () => moveProject(meta.id, ROOT_TARGET) } as ContextMenuItem]
+      : []),
     'separator',
     { label: 'Borrar', danger: true, onSelect: () => handleTrash(meta) },
   ];
@@ -308,18 +516,21 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
 
   // ── Layout ──────────────────────────────────────────────────────────────────
   const navItem = (id: Section, label: string, Icon: React.ElementType, count?: number) => {
-    const active = section === id;
+    const isProjects = id === 'projects';
+    // "Proyectos" is the root of Inicio: it stays highlighted only when no folder is open
+    const active = section === id && (!isProjects || !currentFolder);
     const isTrash = id === 'trash';
     return (
       <button
-        onClick={() => setSection(id)}
+        onClick={() => (isProjects ? openFolder(null) : setSection(id))}
+        {...(isProjects ? dropZone(ROOT_TARGET) : {})}
         className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
           active
             ? isTrash
               ? 'bg-destructive/10 text-destructive border-l-2 border-destructive font-bold'
               : 'bg-bento-blue-light text-bento-blue border-l-2 border-bento-blue font-bold'
             : 'hover:bg-accent text-muted-foreground hover:text-foreground'
-        }`}
+        } ${isProjects ? dropClass(ROOT_TARGET) : ''}`}
       >
         <Icon className="w-3.5 h-3.5 shrink-0" />
         <span className="text-xs font-semibold flex-1">{label}</span>
@@ -357,6 +568,68 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
 
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
           {navItem('projects', 'Proyectos', SquaresFour, projects.length)}
+          {folders.length > 0 && (
+            <div className="ml-3 pl-1.5 border-l border-border space-y-0.5 py-0.5">
+              {folders.map((folder) => {
+                const active = section === 'projects' && currentFolder?.id === folder.id;
+                return (
+                  <div
+                    key={folder.id}
+                    {...dropZone(folder.id)}
+                    className={`group/folder rounded-lg transition-colors ${dropClass(folder.id)}`}
+                  >
+                    <button
+                      onClick={() => openFolder(folder.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setFolderMenu({ x: e.clientX, y: e.clientY, folder });
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-bento-blue-light text-bento-blue border-l-2 border-bento-blue font-bold'
+                          : 'hover:bg-accent text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {active ? (
+                        <FolderOpen className="w-3.5 h-3.5 shrink-0 text-bento-yellow" weight="fill" />
+                      ) : (
+                        <FolderSimple className="w-3.5 h-3.5 shrink-0 text-bento-yellow" weight="fill" />
+                      )}
+                      <span className="text-xs font-semibold truncate flex-1">{folder.name}</span>
+                      <span
+                        className="flex items-center gap-0.5 opacity-0 group-hover/folder:opacity-100 focus-within:opacity-100 transition-opacity"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => handleRenameFolder(folder)}
+                          className="p-0.5 rounded hover:text-foreground hover:bg-accent/50 cursor-pointer"
+                          data-tooltip="Renombrar carpeta"
+                          aria-label="Renombrar carpeta"
+                        >
+                          <PencilSimple className="w-3 h-3" />
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => handleDeleteFolder(folder)}
+                          className="p-0.5 rounded hover:text-destructive hover:bg-destructive/10 cursor-pointer"
+                          data-tooltip="Eliminar carpeta"
+                          aria-label="Eliminar carpeta"
+                        >
+                          <TrashSimple className="w-3 h-3" />
+                        </span>
+                      </span>
+                      <span className="text-[9px] font-mono text-muted-foreground min-w-3 text-right">
+                        {folderCounts.get(folder.id) ?? 0}
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {navItem('trash', 'Papelera', TrashSimple, trashed.length)}
         </nav>
 
@@ -390,6 +663,19 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
           </div>
 
           <button
+            onClick={() => setSection('backup')}
+            className={`w-full px-3 py-2 border rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer font-semibold leading-none shadow-card ${
+              section === 'backup'
+                ? 'bg-accent border-ring/40 text-foreground'
+                : 'bg-card hover:bg-accent border-border text-foreground'
+            }`}
+            data-tooltip="Guarda todo tu espacio de trabajo en un archivo o pásalo a otro navegador"
+          >
+            <Archive className="w-4 h-4 text-muted-foreground" />
+            Respaldo
+          </button>
+
+          <button
             onClick={() => setSection('about')}
             className={`relative w-full px-3 py-2 border rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer font-semibold leading-none shadow-card ${
               section === 'about'
@@ -408,6 +694,14 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
       <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
         {section === 'about' ? (
           <AboutNori />
+        ) : section === 'backup' ? (
+          <BackupSection
+            projects={projects}
+            trashed={trashed}
+            folders={folders}
+            formatRelative={formatRelative}
+            onRestored={refresh}
+          />
         ) : section === 'trash' ? (
           <TrashSection
             trashed={trashed}
@@ -420,13 +714,44 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
             <div className="max-w-6xl mx-auto space-y-8 animate-fade-in">
               {/* Header */}
               <div className="border-b border-border pb-6">
-                <div className="min-w-0">
-                  <h1 className="text-2xl font-black text-foreground font-heading">Inicio</h1>
-                  <p className="text-muted-foreground text-xs mt-1.5 leading-normal max-w-xl">
-                    Tus animaciones se guardan solas mientras las editas. Pasa el cursor sobre un proyecto para ver su animación y haz clic para abrirlo.
-                  </p>
-                </div>
-
+                {currentFolder ? (
+                  <div className="min-w-0">
+                    <h1 className="text-2xl font-black text-foreground font-heading flex items-center gap-2 min-w-0">
+                      <button
+                        onClick={() => openFolder(null)}
+                        {...dropZone(ROOT_TARGET)}
+                        className={`-mx-1.5 px-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 ${dropClass(ROOT_TARGET)}`}
+                        data-tooltip="Volver a Inicio (suelta aquí un proyecto para sacarlo de la carpeta)"
+                      >
+                        Inicio
+                      </button>
+                      <CaretRight className="w-4 h-4 text-muted-foreground shrink-0" weight="bold" />
+                      <FolderOpen className="w-6 h-6 text-bento-yellow shrink-0" weight="fill" />
+                      <FolderTitleInput
+                        key={currentFolder.id}
+                        name={currentFolder.name}
+                        onRename={(name) => {
+                          if (renameFolder(currentFolder.id, name)) {
+                            refresh();
+                            toast(`Carpeta renombrada a "${name}"`, 'success');
+                          } else {
+                            toast('No se pudo renombrar la carpeta', 'error');
+                          }
+                        }}
+                      />
+                    </h1>
+                    <p className="text-muted-foreground text-xs mt-1.5 leading-normal max-w-xl">
+                      Los proyectos que crees o importes aquí se guardan en esta carpeta. Arrastra un proyecto a "Inicio" o a otra carpeta para moverlo.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="min-w-0">
+                    <h1 className="text-2xl font-black text-foreground font-heading">Inicio</h1>
+                    <p className="text-muted-foreground text-xs mt-1.5 leading-normal max-w-xl">
+                      Tus animaciones se guardan solas mientras las editas. Pasa el cursor sobre un proyecto para ver su animación y haz clic para abrirlo; arrástralo sobre una carpeta para guardarlo en ella.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Where the projects live (once closed, it stays in the sidebar's storage info) */}
@@ -451,46 +776,81 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
               {/* Create or import */}
               <section className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  {actions.map(({ label, desc, Icon, onClick, primary }) => (
-                    <button
-                      key={label}
-                      onClick={onClick}
-                      data-tooltip={desc}
-                      className={`h-8 px-3 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                        primary
-                          ? 'bg-bento-blue border-bento-blue text-white hover:bg-bento-blue/90 shadow-card'
-                          : 'bg-card border-border text-foreground hover:bg-accent'
-                      }`}
-                    >
-                      <Icon className={`w-4 h-4 ${primary ? 'text-white' : 'text-bento-blue'}`} />
-                      {label}
-                    </button>
-                  ))}
+                  <MenuButton label="Crear" Icon={Plus} items={createItems} primary title="Proyecto en blanco, proyecto de ejemplo o carpeta" />
+                  <button
+                    onClick={() => jsonInputRef.current?.click()}
+                    data-tooltip="Proyecto de Nori o animación Lottie"
+                    className="h-8 px-3 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap bg-card border-border text-foreground hover:bg-accent"
+                  >
+                    <FolderOpen className="w-4 h-4 text-bento-blue" />
+                    Abrir JSON / Lottie
+                  </button>
+                  <MenuButton label="Importar" Icon={DownloadSimple} items={importItems} title="Archivo SVG, código SVG o un frame de Figma" />
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  También puedes arrastrar un archivo .json (Nori o Lottie) o .svg a cualquier parte de la ventana.
+                  También puedes arrastrar un archivo .json (Nori o Lottie) o .svg a cualquier parte de la ventana
+                  {currentFolder ? '; se guardará en esta carpeta.' : '.'}
                 </p>
                 <input type="file" ref={jsonInputRef} onChange={handleFileChange} accept=".json,.nori.json" className="hidden" />
                 <input type="file" ref={svgInputRef} onChange={handleFileChange} accept=".svg,image/svg+xml" className="hidden" />
               </section>
 
-              {/* Saved projects */}
+              {/* Folders (only at the root) */}
+              {!currentFolder && folders.length > 0 && (
+                <section className="space-y-3">
+                  <h2 className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                    Carpetas <span className="font-mono">({folders.length})</span>
+                  </h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {folders.map((folder) => (
+                      <FolderCard
+                        key={folder.id}
+                        folder={folder}
+                        count={folderCounts.get(folder.id) ?? 0}
+                        dropProps={dropZone(folder.id)}
+                        isDropTarget={!!draggedId && dropTarget === folder.id}
+                        onOpen={() => openFolder(folder.id)}
+                        onOpenMenu={(x, y) => setFolderMenu({ x, y, folder })}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Saved projects, most recently edited first */}
               <section className="space-y-3 pb-4">
                 <h2 className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
-                  Mis proyectos <span className="font-mono">({projects.length})</span>
+                  {currentFolder ? 'Proyectos en esta carpeta' : 'Mis proyectos'}{' '}
+                  <span className="font-mono">({visibleProjects.length})</span>
                 </h2>
-                {projects.length === 0 ? (
+                {visibleProjects.length === 0 ? (
                   <div className="text-center py-16 border border-dashed border-border rounded-2xl">
-                    <SquaresFour className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-30" />
-                    <p className="text-sm font-semibold text-foreground">Aún no tienes proyectos</p>
-                    <p className="text-xs text-muted-foreground mt-1">Crea uno nuevo o importa un archivo para empezar.</p>
+                    {currentFolder ? (
+                      <>
+                        <FolderOpen className="w-12 h-12 mx-auto mb-3 text-bento-yellow opacity-40" />
+                        <p className="text-sm font-semibold text-foreground">Carpeta vacía</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Crea o importa un proyecto aquí, o arrastra uno desde Inicio hasta esta carpeta en la barra lateral.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <SquaresFour className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-30" />
+                        <p className="text-sm font-semibold text-foreground">
+                          {projects.length > 0 ? 'No hay proyectos fuera de las carpetas' : 'Aún no tienes proyectos'}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">Crea uno nuevo o importa un archivo para empezar.</p>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {projects.map((meta) => (
+                    {visibleProjects.map((meta) => (
                       <ProjectCard
                         key={meta.id}
                         meta={meta}
+                        dragProps={projectDrag(meta)}
+                        dragging={draggedId === meta.id}
                         onOpen={() => onOpenProject(meta.id)}
                         onOpenMenu={(x, y) => setMenu({ x, y, meta })}
                       />
@@ -510,12 +870,18 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
               <DownloadSimple className="w-7 h-7" />
             </div>
             <p className="text-base font-bold text-foreground font-heading">Suelta el archivo para importarlo</p>
-            <p className="text-xs text-muted-foreground">Proyecto de Nori o animación Lottie (.json) o imagen .svg · se creará un proyecto nuevo</p>
+            <p className="text-xs text-muted-foreground">
+              Proyecto de Nori o animación Lottie (.json) o imagen .svg · se creará un proyecto nuevo
+              {targetFolderId && currentFolder ? ` en la carpeta "${currentFolder.name}"` : ''}
+            </p>
           </div>
         </div>
       )}
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={buildMenuItems(menu.meta)} onClose={closeMenu} />}
+      {folderMenu && (
+        <ContextMenu x={folderMenu.x} y={folderMenu.y} items={buildFolderMenuItems(folderMenu.folder)} onClose={closeFolderMenu} />
+      )}
 
       {exportTarget && (
         <ExportModal key={exportTarget.id} project={exportTarget} isOpen onClose={() => setExportTarget(null)} />
@@ -540,16 +906,20 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
 
 interface ProjectCardProps {
   meta: ProjectMeta;
+  /** Native drag props, to drop the card on a folder */
+  dragProps: React.HTMLAttributes<HTMLDivElement> & { draggable: boolean };
+  dragging: boolean;
   onOpen: () => void;
   onOpenMenu: (x: number, y: number) => void;
 }
 
-function ProjectCard({ meta, onOpen, onOpenMenu }: ProjectCardProps) {
+function ProjectCard({ meta, dragProps, dragging, onOpen, onOpenMenu }: ProjectCardProps) {
   const [hovered, setHovered] = useState(false);
   const project = useMemo(() => loadProject(meta.id), [meta.id, meta.updatedAt]);
 
   return (
     <div
+      {...dragProps}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -562,7 +932,9 @@ function ProjectCard({ meta, onOpen, onOpenMenu }: ProjectCardProps) {
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="group border border-border bg-card hover:border-bento-blue/50 hover:shadow-card-hover rounded-2xl overflow-hidden transition-all duration-300 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={`group border border-border bg-card hover:border-bento-blue/50 hover:shadow-card-hover rounded-2xl overflow-hidden transition-all duration-300 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+        dragging ? 'opacity-50' : ''
+      }`}
     >
       <ProjectThumbnail project={project} playing={hovered} className="aspect-video border-b border-border" />
       <div className="p-3 flex items-start gap-2">
@@ -586,6 +958,107 @@ function ProjectCard({ meta, onOpen, onOpenMenu }: ProjectCardProps) {
           <DotsThree className="w-4 h-4" weight="bold" />
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Folder title ─────────────────────────────────────────────────────────────
+
+// Name of the open folder, renamed in place like the project title in the editor:
+// Enter or leaving the field saves, Escape restores the current name
+function FolderTitleInput({ name, onRename }: { name: string; onRename: (name: string) => void }) {
+  const [draft, setDraft] = useState(name);
+
+  // Keep the field in sync when the folder is renamed elsewhere (sidebar, another tab)
+  useEffect(() => setDraft(name), [name]);
+
+  const commit = () => {
+    const next = draft.trim();
+    if (!next) setDraft(name);
+    else if (next !== name) onRename(next);
+  };
+
+  return (
+    <input
+      type="text"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          setDraft(name);
+          // Blur after the reset so the current name is kept
+          const input = e.currentTarget;
+          requestAnimationFrame(() => input.blur());
+        }
+      }}
+      size={Math.max(4, draft.length + 1)}
+      maxLength={60}
+      spellCheck={false}
+      data-tooltip="Clic para renombrar la carpeta"
+      aria-label="Nombre de la carpeta"
+      className="min-w-0 max-w-full bg-transparent border-0 text-foreground text-2xl font-black font-heading hover:bg-accent focus:bg-card -ml-1 px-1.5 py-0.5 rounded-xl focus:outline-none transition-colors focus:ring-1 focus:ring-ring truncate"
+    />
+  );
+}
+
+// ─── Folder card ──────────────────────────────────────────────────────────────
+
+interface FolderCardProps {
+  folder: FolderMeta;
+  count: number;
+  dropProps: React.HTMLAttributes<HTMLDivElement>;
+  isDropTarget: boolean;
+  onOpen: () => void;
+  onOpenMenu: (x: number, y: number) => void;
+}
+
+function FolderCard({ folder, count, dropProps, isDropTarget, onOpen, onOpenMenu }: FolderCardProps) {
+  return (
+    <div
+      {...dropProps}
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onOpen();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onOpenMenu(e.clientX, e.clientY);
+      }}
+      className={`group h-14 pl-3 pr-2 flex items-center gap-3 border rounded-xl transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+        isDropTarget
+          ? 'border-bento-yellow bg-bento-yellow/10 ring-2 ring-bento-yellow/40'
+          : 'border-border bg-card hover:border-bento-yellow/60 hover:shadow-card-hover'
+      }`}
+    >
+      {isDropTarget ? (
+        <FolderOpen className="w-6 h-6 shrink-0 text-bento-yellow" weight="fill" />
+      ) : (
+        <FolderSimple className="w-6 h-6 shrink-0 text-bento-yellow" weight="fill" />
+      )}
+      <div className="min-w-0 flex-1">
+        <h3 className="font-semibold text-foreground text-sm truncate font-heading">{folder.name}</h3>
+        <p className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
+          <File className="w-3 h-3 shrink-0" />
+          {count === 0 ? 'Vacía' : count === 1 ? '1 proyecto' : `${count} proyectos`}
+        </p>
+      </div>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          const rect = e.currentTarget.getBoundingClientRect();
+          onOpenMenu(rect.left, rect.bottom + 4);
+        }}
+        className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 cursor-pointer"
+        data-tooltip="Más opciones"
+        aria-label="Más opciones"
+      >
+        <DotsThree className="w-4 h-4" weight="bold" />
+      </button>
     </div>
   );
 }

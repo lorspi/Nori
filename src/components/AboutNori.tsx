@@ -68,6 +68,7 @@ export default function AboutNori() {
     'Phosphor Icons',
     'Canvas 2D',
     'gifenc',
+    'fflate',
   ];
 
   const tabs = [

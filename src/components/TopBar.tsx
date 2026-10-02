@@ -47,6 +47,9 @@ interface TopBarProps {
   onOpenExport: () => void;
   onDownloadJson: () => void;
   onGoHome: () => void;
+  /** Folder that holds the project, shown in the breadcrumb */
+  folder: { id: string; name: string } | null;
+  onOpenFolder: (id: string) => void;
   onRenameProject: (title: string) => void;
   onAddLayer: (type: ShapeType) => void;
 }
@@ -66,6 +69,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenExport,
   onDownloadJson,
   onGoHome,
+  folder,
+  onOpenFolder,
   onRenameProject,
   onAddLayer,
 }) => {
@@ -199,6 +204,18 @@ export const TopBar: React.FC<TopBarProps> = ({
           Inicio
         </button>
         <span className="text-muted-foreground/60 px-0.5 select-none" aria-hidden="true">/</span>
+        {folder && (
+          <>
+            <button
+              onClick={() => onOpenFolder(folder.id)}
+              className="px-1.5 py-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent font-semibold transition-colors cursor-pointer whitespace-nowrap max-w-48 truncate"
+              data-tooltip="Ir a la carpeta del proyecto"
+            >
+              {folder.name}
+            </button>
+            <span className="text-muted-foreground/60 px-0.5 select-none" aria-hidden="true">/</span>
+          </>
+        )}
         <input
           type="text"
           value={titleDraft}

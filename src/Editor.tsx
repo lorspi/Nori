@@ -68,9 +68,12 @@ interface EditorProps {
   /** Start playing right away (the example project) */
   autoplay?: boolean;
   onGoHome: () => void;
+  /** Folder that holds the project, shown in the breadcrumb of the top bar */
+  folder: { id: string; name: string } | null;
+  onOpenFolder: (id: string) => void;
 }
 
-export default function Editor({ initialProject, autoplay = false, onGoHome }: EditorProps) {
+export default function Editor({ initialProject, autoplay = false, onGoHome, folder, onOpenFolder }: EditorProps) {
   const [project, setProject] = useState<Project>(initialProject);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(autoplay);
@@ -1399,6 +1402,8 @@ export default function Editor({ initialProject, autoplay = false, onGoHome }: E
         onOpenExport={() => setIsExportOpen(true)}
         onDownloadJson={handleDownloadJson}
         onGoHome={onGoHome}
+        folder={folder}
+        onOpenFolder={onOpenFolder}
         onRenameProject={(title) => {
           recordHistory(project);
           setProject((prev) => ({ ...prev, title }));
