@@ -1,7 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 // App-wide tooltips. Any element with a data-tooltip attribute shows it on hover;
-// data-shortcut adds key caps ("Ctrl+G", alternatives separated by " / ").
+// data-shortcut adds key caps ("Ctrl+G", alternatives separated by " / ") and data-tooltip-title
+// a bold heading above the text.
 
 const SHOW_DELAY = 450;
 // Once a tooltip is visible, moving to a neighbour shows its tooltip right away
@@ -12,13 +13,14 @@ const MARGIN = 8;
 interface TooltipState {
   el: HTMLElement;
   text: string;
+  title: string | null;
   shortcut: string | null;
 }
 
 const readTooltip = (el: HTMLElement): TooltipState | null => {
   const text = el.getAttribute('data-tooltip');
   if (!text) return null;
-  return { el, text, shortcut: el.getAttribute('data-shortcut') };
+  return { el, text, title: el.getAttribute('data-tooltip-title'), shortcut: el.getAttribute('data-shortcut') };
 };
 
 // On Mac the editor's Ctrl shortcuts are also read with Cmd
@@ -129,9 +131,9 @@ export const TooltipLayer: React.FC = () => {
       }
       const next = readTooltip(tip.el);
       if (!next) setTip(null);
-      else if (next.text !== tip.text || next.shortcut !== tip.shortcut) setTip(next);
+      else if (next.text !== tip.text || next.title !== tip.title || next.shortcut !== tip.shortcut) setTip(next);
     });
-    observer.observe(tip.el, { attributes: true, attributeFilter: ['data-tooltip', 'data-shortcut'] });
+    observer.observe(tip.el, { attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-title', 'data-shortcut'] });
     const parent = tip.el.parentNode;
     if (parent) observer.observe(parent, { childList: true });
     return () => observer.disconnect();
@@ -158,7 +160,14 @@ export const TooltipLayer: React.FC = () => {
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
       className="fixed z-10000 pointer-events-none max-w-xs flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg bg-[#27272a] dark:bg-[#3f3f46] text-white text-[11px] font-body font-medium leading-snug shadow-card-hover whitespace-pre-line animate-tooltip-in"
     >
-      <span>{tip.text}</span>
+      {tip.title ? (
+        <span className="flex flex-col gap-1 py-0.5">
+          <span className="font-bold text-[12px]">{tip.title}</span>
+          <span className="font-normal text-white/75">{tip.text}</span>
+        </span>
+      ) : (
+        <span>{tip.text}</span>
+      )}
       {tip.shortcut && <ShortcutKeys shortcut={tip.shortcut} />}
     </div>
   );

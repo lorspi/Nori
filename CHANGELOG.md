@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.2.0] — 2026-10-01
+
+### Added
+
+- **Varios proyectos guardados en el navegador**
+  Nori ahora guarda todos tus proyectos, no solo el último. Cada cambio se guarda solo mientras editas, en el almacenamiento local (localStorage) del navegador. Al abrir Nori se carga el último proyecto que estabas editando; la primera vez se abre el proyecto de ejemplo. El proyecto que guardaban las versiones anteriores pasa automáticamente a la nueva lista.
+
+- **Inicio**
+  Una nueva pantalla reúne los proyectos guardados en una cuadrícula. Al pasar el cursor sobre un proyecto se reproduce su animación y con un clic se abre. Cada proyecto tiene un menú (clic derecho o el botón "…") con Abrir, Exportar, Descargar JSON, Renombrar, Duplicar y Borrar. Un aviso deja claro que los proyectos solo existen en este navegador y en este equipo; se puede cerrar, y desde entonces el mismo aviso aparece al pasar el cursor por el icono de información junto a Almacenamiento, en la barra lateral, que muestra el espacio que ocupan los proyectos.
+
+- **Crear e importar desde Inicio**
+  Las acciones del antiguo menú Abrir están ahora en una barra de botones de Inicio (cada uno explica qué hace al pasar el cursor): Nuevo proyecto, Abrir JSON / Lottie, Importar SVG, Código SVG, Importar desde Figma y Proyecto de ejemplo. Cada una crea un proyecto nuevo en la lista, sin reemplazar el que estaba abierto. Arrastrar un archivo .json o .svg a la ventana también crea un proyecto nuevo: en Inicio, al arrastrarlo aparece un recuadro que indica dónde soltarlo, y si el archivo no es compatible o está dañado se muestra un mensaje de error con el motivo.
+
+- **Papelera de reciclaje**
+  Los proyectos borrados van a la Papelera, desde donde se pueden restaurar o eliminar permanentemente, uno a uno o vaciándola entera.
+
+- **Botón para descargar el proyecto**
+  A la izquierda de Exportar, un botón con el icono de descarga guarda el proyecto como archivo JSON de Nori (también con Ctrl + S).
+
+### Changed
+
+- **Barra superior del editor**
+  Delante del nombre del proyecto aparece "Inicio /", que lleva de vuelta a los proyectos guardados. Desaparecen los botones de nuevo proyecto, abrir y guardar, ya que los proyectos se guardan solos y se crean desde Inicio. El botón Exportar usa ahora el icono de video.
+
+- **Acerca de Nori se mueve a Inicio**
+  Acerca de Nori y el historial de cambios se abren desde la parte inferior de la barra lateral de Inicio, en lugar de desde el editor.
+
+- **Sin aviso al cambiar de proyecto**
+  Como cada proyecto se guarda solo, ya no aparece la ventana de "cambios no guardados" al abrir otro proyecto.
+
+- **Título de la pestaña**
+  La pestaña del navegador muestra el nombre del proyecto abierto.
+
 ## [1.1.1] — 2026-10-01
 
 ### Added

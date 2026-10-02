@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useVersion, useUpdateCheck } from '../hooks/useVersion';
 import {
   Info,
@@ -16,7 +16,6 @@ import {
   Download,
   ArrowSquareOut as ExternalLink,
   Newspaper,
-  X,
 } from '@phosphor-icons/react';
 import changelog from '../../CHANGELOG.md?raw';
 
@@ -56,27 +55,10 @@ function ChangelogRenderer({ content }: { content: string }) {
   return <div className="space-y-0">{elements}</div>;
 }
 
-interface AboutNoriProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export default function AboutNori({ isOpen, onClose }: AboutNoriProps) {
+export default function AboutNori() {
   const [activeTab, setActiveTab] = useState<'about' | 'changelog'>('about');
   const version = useVersion();
   const { updateAvailable, remoteVersion } = useUpdateCheck();
-
-  // Close with Escape
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
 
   const techStack = [
     'React 19',
@@ -94,24 +76,7 @@ export default function AboutNori({ isOpen, onClose }: AboutNoriProps) {
   ];
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-background text-foreground select-text animate-fade-in">
-      {/* Header */}
-      <header className="h-12 shrink-0 border-b border-border bg-card px-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <img src="/icon.svg" alt="Nori" className="w-6 h-6 shrink-0" />
-          <span className="text-sm font-bold text-foreground font-heading">Acerca de Nori</span>
-        </div>
-        <button
-          onClick={onClose}
-          className="w-8 h-8 rounded-lg bg-card border border-border shadow-card flex items-center justify-center text-foreground hover:bg-accent transition-all duration-300 ease-out cursor-pointer"
-          data-tooltip="Volver al editor"
-          data-shortcut="Esc"
-          aria-label="Cerrar"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </header>
-
+    <div className="flex-1 flex flex-col overflow-hidden bg-background text-foreground select-text animate-fade-in">
       <div className="flex-1 overflow-auto p-4 sm:p-6 font-body">
         <div className="max-w-2xl mx-auto">
 
