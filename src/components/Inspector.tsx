@@ -23,7 +23,7 @@ import {
   PencilSimple,
   Polygon as PolygonIcon,
 } from '@phosphor-icons/react';
-import { ColorSwatch, isNoColor, useUndoSession } from './ColorSwatch';
+import { ColorSwatch, HexColorInput, isNoColor } from './ColorSwatch';
 import { DEFAULT_SHAPE } from '../utils/pathGeometry';
 import { Layer, Project, EasingConfig, AnimatableProperty, KeyframeRef, ShadowEffect, StrokeAlign } from '../types/animation';
 import { AlignMode } from '../utils/alignment';
@@ -153,8 +153,6 @@ export const Inspector: React.FC<InspectorProps> = ({
   const [aspectLocked, setAspectLocked] = useState(true);
   // Last color of each removed fill / stroke, restored when it's added back
   const lastColors = useRef<Record<string, string>>({});
-  // Typing a hex color is one undo step per visit to the field
-  const typingSession = useUndoSession();
 
   // The curve editor works on the selected keyframes only (never on an implicit fallback),
   // showing the first one's curve and applying edits to all of them
@@ -304,12 +302,11 @@ export const Inspector: React.FC<InspectorProps> = ({
                 onChange={(color, recordUndo) => onUpdateProjectSettings({ backgroundColor: color }, recordUndo)}
                 title="Color de fondo"
               />
-              <input
-                type="text"
+              <HexColorInput
                 value={project.backgroundColor}
-                onFocus={typingSession.begin}
-                onChange={(e) => onUpdateProjectSettings({ backgroundColor: e.target.value }, typingSession.take())}
-                className="flex-1 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
+                onChange={(color, recordUndo) => onUpdateProjectSettings({ backgroundColor: color }, recordUndo)}
+                className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
+                ariaLabel="Color de fondo"
               />
             </div>
           </div>
@@ -454,13 +451,11 @@ export const Inspector: React.FC<InspectorProps> = ({
                 onChange={(color, recordUndo) => update({ color }, recordUndo)}
                 title={`Color de la ${name}`}
               />
-              <input
-                type="text"
+              <HexColorInput
                 value={current.color}
-                onFocus={typingSession.begin}
-                onChange={(e) => update({ color: e.target.value.trim() || '#000000' }, typingSession.take())}
+                onChange={(color, recordUndo) => update({ color }, recordUndo)}
                 className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
-                aria-label={`Color de la ${name}`}
+                ariaLabel={`Color de la ${name}`}
               />
               {renderOpacityField(
                 Math.round(current.opacity * 100),
@@ -505,13 +500,13 @@ export const Inspector: React.FC<InspectorProps> = ({
     return (
       <div className="flex items-center gap-1.5">
         <ColorSwatch value={value} onChange={setColor} title={prop === 'fill' ? 'Color de relleno' : 'Color del trazo'} />
-        <input
-          type="text"
-          value={none ? '' : value}
+        <HexColorInput
+          value={value}
+          onChange={setColor}
+          emptyValue="transparent"
           placeholder={emptyLabel}
-          onFocus={typingSession.begin}
-          onChange={(e) => setColor(e.target.value.trim() || 'transparent', typingSession.take())}
           className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground placeholder:text-muted-foreground"
+          ariaLabel={prop === 'fill' ? 'Color de relleno' : 'Color del trazo'}
         />
         {renderOpacityField(Math.round((p[opacityProp] ?? 1) * 100), setOpacity, opacityLabel, none)}
         <button
@@ -1130,7 +1125,9 @@ export const Inspector: React.FC<InspectorProps> = ({
               {renderAnimToggle(['stroke', 'strokeOpacity', 'strokeWidth'], 'trazo')}
             </div>
             {renderPaintRow('stroke', '#1a1d23', 'Sin trazo')}
-            <div className={`grid grid-cols-2 gap-2 ${isNoColor(p.stroke) ? 'opacity-50' : ''}`}>
+            {/* Width and position only make sense with a stroke */}
+            {!isNoColor(p.stroke) && (
+            <div className="grid grid-cols-2 gap-2">
               <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-md px-2 h-7">
               <ScrubLabel
                 value={p.strokeWidth || 0}
@@ -1162,11 +1159,13 @@ export const Inspector: React.FC<InspectorProps> = ({
                 size="sm"
                 className="w-full"
                 menuClassName="w-full"
-                disabled={selectedLayer.type === 'text'}
+                /* A stroke 0 px wide has nothing to position */
+                disabled={selectedLayer.type === 'text' || !(p.strokeWidth > 0)}
                 title="Posición del trazo respecto al borde de la forma"
                 ariaLabel="Posición del trazo"
               />
             </div>
+            )}
           </div>
         </div>
       </div>

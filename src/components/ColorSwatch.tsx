@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { parseColor } from '../utils/interpolator';
 
 // Hex value for the native color picker (it only understands #rrggbb)
@@ -88,5 +88,105 @@ export const ColorSwatch: React.FC<ColorSwatchProps> = ({ value, onChange, title
         aria-label={title}
       />
     </label>
+  );
+};
+
+// Keeps only hex digits (at most 6) behind a "#"; an empty field stays empty
+export function sanitizeHexInput(text: string): string {
+  const digits = text.replace(/[^0-9a-f]/gi, '').slice(0, 6);
+  return digits ? `#${digits}` : '';
+}
+
+// Completes a partial hex value following its pattern: "f" → #ffffff, "c0" → #c0c0c0,
+// "abc" → #aabbcc (CSS shorthand); 4 or 5 digits repeat from the start. null when empty.
+export function completeHexColor(text: string): string | null {
+  const digits = sanitizeHexInput(text).slice(1);
+  if (!digits) return null;
+  if (digits.length === 3) return `#${digits.split('').map((c) => c + c).join('')}`;
+  return `#${digits.repeat(6).slice(0, 6)}`;
+}
+
+interface HexColorInputProps {
+  value: string;
+  onChange: (color: string, recordUndo: boolean) => void;
+  // Committed when the field is emptied (e.g. "transparent"); without it, an empty field reverts
+  emptyValue?: string;
+  placeholder?: string;
+  className?: string;
+  ariaLabel?: string;
+}
+
+// Hex text field: adds the "#", accepts only hex digits (up to 6) and, when it loses focus or on
+// Enter, completes a partial value. Each visit to the field is one undo step.
+export const HexColorInput: React.FC<HexColorInputProps> = ({
+  value,
+  onChange,
+  emptyValue,
+  placeholder,
+  className = '',
+  ariaLabel,
+}) => {
+  const session = useUndoSession();
+  const shown = isNoColor(value) ? '' : value;
+  // Text being typed (null while the field isn't being edited)
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const commit = (color: string) => {
+    if (color.toLowerCase() !== value.toLowerCase()) onChange(color, session.take());
+  };
+
+  // Escape leaves the field without applying the text being typed
+  const cancelRef = useRef(false);
+
+  const finish = () => {
+    const cancelled = cancelRef.current;
+    cancelRef.current = false;
+    if (draft === null || cancelled) {
+      setDraft(null);
+      return;
+    }
+    const complete = completeHexColor(draft);
+    if (complete) commit(complete);
+    else if (emptyValue !== undefined) commit(emptyValue);
+    setDraft(null);
+  };
+
+  return (
+    <input
+      type="text"
+      value={draft ?? shown}
+      placeholder={placeholder}
+      spellCheck={false}
+      maxLength={7}
+      onFocus={session.begin}
+      onChange={(e) => {
+        const next = sanitizeHexInput(e.target.value);
+        setDraft(next);
+        // A full value applies while typing
+        if (next.length === 7) commit(next);
+      }}
+      onPaste={(e) => {
+        // Pasted text is cleaned before the length limit cuts it ("ff00aa", "#FF00AA80"…)
+        e.preventDefault();
+        const input = e.currentTarget;
+        const text = input.value;
+        const start = input.selectionStart ?? text.length;
+        const end = input.selectionEnd ?? text.length;
+        const next = sanitizeHexInput(text.slice(0, start) + e.clipboardData.getData('text') + text.slice(end));
+        setDraft(next);
+        if (next.length === 7) commit(next);
+      }}
+      onBlur={finish}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          cancelRef.current = true;
+          e.currentTarget.blur();
+        }
+      }}
+      className={className}
+      aria-label={ariaLabel}
+    />
   );
 };

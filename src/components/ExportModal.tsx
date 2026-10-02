@@ -16,7 +16,7 @@ import {
 import { ExportFormat, ExportSettings, Project } from '../types/animation';
 import { exportProject, ExportProgress, motionBlurSamples } from '../utils/videoExporter';
 import { exportToAnimatedSvg } from '../utils/svgExporter';
-import { ColorSwatch } from './ColorSwatch';
+import { ColorSwatch, HexColorInput } from './ColorSwatch';
 import { Dropdown } from './Dropdown';
 
 interface ExportModalProps {
@@ -440,12 +440,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                     <label className="text-muted-foreground block mb-1">Color de fondo</label>
                     <div className="flex items-center gap-2">
                       <ColorSwatch value={backgroundColor} onChange={setBackgroundColor} title="Color de fondo" className="w-8 h-8 rounded-lg!" />
-                      <input
-                        type="text"
+                      <HexColorInput
                         value={backgroundColor}
-                        onChange={(e) => setBackgroundColor(e.target.value)}
+                        onChange={setBackgroundColor}
                         className="flex-1 min-w-0 bg-card border border-border rounded-lg px-2 h-8 font-mono text-foreground"
-                        aria-label="Color de fondo"
+                        ariaLabel="Color de fondo"
                       />
                     </div>
                   </div>

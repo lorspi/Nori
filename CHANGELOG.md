@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.1.1] — 2026-10-01
+
+### Added
+
+- **Seleccionar varias barras de animación**
+  Shift o Ctrl + clic sobre una barra azul de la línea del tiempo la añade a la selección (o la quita, si ya estaba seleccionada). Al arrastrar cualquiera de las barras seleccionadas se mueven todas a la vez, y al arrastrar un extremo se estiran o encogen en conjunto desde el extremo opuesto del grupo, conservando la separación entre ellas. Un clic sin arrastrar sobre una barra de la selección deja seleccionada solo esa. Todo se deshace en un solo paso.
+
+- **Pegar una animación en varias capas**
+  Con varias capas seleccionadas, pegar una animación o unos fotogramas clave (Ctrl + V o el menú de la línea del tiempo) los pega en todas ellas, a partir del cursor de tiempo. El clic derecho sobre una capa o una barra de la selección ya no la deshace, y el menú indica en cuántas capas se pegará.
+
+### Changed
+
+- **Campos de color hexadecimal**
+  Los campos de color (relleno, trazo, sombras, fondo del lienzo y fondo de la exportación) añaden el "#" si no se escribe, solo aceptan dígitos hexadecimales y no dejan escribir más de seis. Al salir del campo o pulsar Enter, un valor incompleto se completa siguiendo su patrón: "f" pasa a #ffffff, "c0" a #c0c0c0 y "abc" a #aabbcc. Escape descarta lo escrito. Vaciar el campo de relleno o de trazo los quita; en los demás, se recupera el color anterior.
+
+- **Las pistas terminan con el proyecto**
+  En la línea del tiempo, las pistas de las capas y sus propiedades se cortan donde termina la duración del proyecto, y lo que queda a la derecha aparece rayado, para que no parezca que se pueden poner fotogramas clave más adelante.
+
+### Fixed
+
+- **Grosor y posición del trazo sin trazo**
+  Cuando la capa no tiene trazo, los campos Grosor y Posición del trazo se ocultan y vuelven a aparecer al añadirlo. Con un trazo de grosor 0, el desplegable de la posición no se abre.
+
 ## [1.1.0] — 2026-10-01
 
 ### Added

@@ -81,9 +81,12 @@ interface KeyframeDrag {
   moved: boolean;
   // Plain click on an already-selected keyframe collapses the selection to it (if not dragged)
   collapseTo: KeyframeRef | null;
+  // Plain click on a bar of a multi-selection collapses the selection to that layer (if not dragged)
+  collapseToLayer?: string;
   // Dragging an end of a layer bar: that end (edge) moves and the other one (anchor) stays,
-  // spreading the keyframes in between proportionally
-  stretch?: { anchor: number; edge: number };
+  // spreading the keyframes in between proportionally. With several bars, the anchor is the
+  // far end of the whole group and extreme is the group's end on the dragged side.
+  stretch?: { anchor: number; edge: number; extreme: number };
 }
 
 // Box selection in client coordinates
@@ -265,35 +268,69 @@ export const Timeline: React.FC<TimelineProps> = ({
     }
   };
 
+  // Every keyframe of the given layers (the blue bars of a selection)
+  const getLayersKeyframeRefs = (layerIds: string[]) =>
+    project.layers.filter((l) => layerIds.includes(l.id)).flatMap((l) => getLayerKeyframeRefs(l));
+
+  // Selected layers whose bar would move together with the given one ([layerId] if it isn't selected)
+  const getBarGroup = (layerId: string) =>
+    selectedLayerIds.length > 1 && selectedLayerIds.includes(layerId) ? selectedLayerIds : [layerId];
+
+  // Selects layers together with all their keyframes (the primary layer goes last so it wins)
+  const selectBars = (layerIds: string[], primaryId: string | null) => {
+    onSelectKeyframes(getLayersKeyframeRefs(layerIds));
+    onSelectLayers(layerIds, primaryId);
+  };
+
+  // Clicking a bar selects it; Shift / Ctrl + click adds it to (or removes it from) the selection.
+  // Dragging a selected bar moves every selected bar.
   const handleLayerBarMouseDown = (e: React.MouseEvent, layerId: string) => {
     e.stopPropagation();
     if (e.button !== 0) return;
     const layer = project.layers.find((l) => l.id === layerId);
     if (!layer) return;
 
-    const layerRefs = getLayerKeyframeRefs(layer);
-    const refs = e.shiftKey
-      ? [...selectedKeyframes, ...layerRefs.filter((r) => !selectedKeys.has(refKey(r)))]
-      : layerRefs;
-    onSelectLayer(layerId);
-    onSelectKeyframes(refs);
-    startKeyframeDrag(e.clientX, refs, null);
+    const isSelected = selectedLayerIds.includes(layerId);
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      if (isSelected) {
+        const ids = selectedLayerIds.filter((id) => id !== layerId);
+        selectBars(ids, ids.includes(selectedLayerId ?? '') ? selectedLayerId : (ids[0] ?? null));
+        return;
+      }
+      const ids = [...selectedLayerIds, layerId];
+      selectBars(ids, layerId);
+      startKeyframeDrag(e.clientX, getLayersKeyframeRefs(ids), null);
+      return;
+    }
+
+    const group = getBarGroup(layerId);
+    selectBars(group, layerId);
+    startKeyframeDrag(e.clientX, getLayersKeyframeRefs(group), null);
+    if (keyframeDragRef.current && group.length > 1) keyframeDragRef.current.collapseToLayer = layerId;
   };
 
-  // An end of the layer bar: stretches or shrinks the layer's animation from the other end
+  // An end of the layer bar: stretches or shrinks the layer's animation from the other end.
+  // With several bars selected, all of them stretch together from the far end of the group.
   const handleBarEdgeMouseDown = (e: React.MouseEvent, layerId: string, side: 'start' | 'end') => {
     e.stopPropagation();
     if (e.button !== 0) return;
     const layer = project.layers.find((l) => l.id === layerId);
     const range = layer ? getLayerKeyframeRange(layer) : null;
     if (!layer || !range || range.end - range.start <= 0) return;
-    const refs = getLayerKeyframeRefs(layer);
-    onSelectLayer(layerId);
-    onSelectKeyframes(refs);
-    startKeyframeDrag(e.clientX, refs, null);
+    const group = getBarGroup(layerId);
+    const ranges = project.layers
+      .filter((l) => group.includes(l.id))
+      .map((l) => getLayerKeyframeRange(l))
+      .filter((r): r is NonNullable<typeof r> => !!r);
+    const groupStart = Math.min(...ranges.map((r) => r.start));
+    const groupEnd = Math.max(...ranges.map((r) => r.end));
+    selectBars(group, layerId);
+    startKeyframeDrag(e.clientX, getLayersKeyframeRefs(group), null);
     if (keyframeDragRef.current) {
       keyframeDragRef.current.stretch =
-        side === 'end' ? { anchor: range.start, edge: range.end } : { anchor: range.end, edge: range.start };
+        side === 'end'
+          ? { anchor: groupStart, edge: range.end, extreme: groupEnd }
+          : { anchor: groupEnd, edge: range.start, extreme: groupStart };
     }
   };
 
@@ -348,7 +385,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
       const drag = keyframeDragRef.current;
       if (isDraggingKeyframes && drag?.stretch) {
-        const { anchor, edge } = drag.stretch;
+        const { anchor, edge, extreme } = drag.stretch;
         const rawEdge = edge + (e.clientX - drag.startClientX) / pixelsPerSecond;
         // The moving end stays inside the timeline and at least one frame away from the other
         const frame = 1 / project.fps;
@@ -359,7 +396,9 @@ export const Timeline: React.FC<TimelineProps> = ({
           onStartKeyframeDrag?.(); // One undo step for the whole drag
         }
         if (drag.moved) {
-          const factor = (nextEdge - anchor) / (edge - anchor);
+          // The group's far end on the dragged side doesn't leave the timeline either
+          const bound = edge > anchor ? duration : 0;
+          const factor = Math.min((nextEdge - anchor) / (edge - anchor), (bound - anchor) / (extreme - anchor));
           onSetKeyframeTimes(drag.base.map((b) => ({ ...b, time: anchor + (b.time - anchor) * factor })));
         }
       } else if (isDraggingKeyframes && drag) {
@@ -388,6 +427,9 @@ export const Timeline: React.FC<TimelineProps> = ({
       const drag = keyframeDragRef.current;
       if (drag && !drag.moved && drag.collapseTo) {
         onSelectKeyframes([drag.collapseTo]);
+      }
+      if (drag && !drag.moved && drag.collapseToLayer) {
+        selectBars([drag.collapseToLayer], drag.collapseToLayer);
       }
       keyframeDragRef.current = null;
       setIsScrubbing(false);
@@ -460,14 +502,15 @@ export const Timeline: React.FC<TimelineProps> = ({
   const handleBarContextMenu = (e: React.MouseEvent, layerId: string) => {
     const layer = project.layers.find((l) => l.id === layerId);
     if (!layer) return;
-    const refs = getLayerKeyframeRefs(layer);
-    onSelectLayer(layerId);
-    onSelectKeyframes(refs);
+    // Right-clicking a bar of a multi-selection keeps the selection (to paste on all of them)
+    const group = getBarGroup(layerId);
+    const refs = getLayersKeyframeRefs(group);
+    selectBars(group, layerId);
     openMenu(e, layerId, 'bar', refs);
   };
 
   const handleRowContextMenu = (e: React.MouseEvent, layerId: string) => {
-    onSelectLayer(layerId);
+    if (!selectedLayerIds.includes(layerId)) onSelectLayer(layerId);
     openMenu(e, layerId, 'row', []);
   };
 
@@ -477,6 +520,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     const layer = project.layers.find((l) => l.id === m.layerId);
     const hasAnimation = !!layer && layer.tracks.length > 0;
     const count = m.refs.length;
+    const pasteCount = getBarGroup(m.layerId).length;
     const items: ContextMenuItem[] = [
       { label: 'Animaciones predeterminadas…', onSelect: () => onOpenAnimationPresets(m.layerId) },
       'separator',
@@ -507,8 +551,12 @@ export const Timeline: React.FC<TimelineProps> = ({
     items.push({
       label:
         clipboardKind === 'layer'
-          ? 'Pegar animación en esta capa'
-          : 'Pegar fotogramas clave en el tiempo actual',
+          ? pasteCount > 1
+            ? `Pegar animación en ${pasteCount} capas`
+            : 'Pegar animación en esta capa'
+          : pasteCount > 1
+            ? `Pegar fotogramas clave en ${pasteCount} capas`
+            : 'Pegar fotogramas clave en el tiempo actual',
       shortcut: 'Ctrl+V',
       disabled: !clipboardKind,
       onSelect: () => onPaste(m.layerId),
@@ -711,6 +759,10 @@ export const Timeline: React.FC<TimelineProps> = ({
             style={{ width: `${Math.max(800, totalWidth + 100)}px` }}
             className="h-full relative"
           >
+            <div
+              style={{ left: `${totalWidth}px` }}
+              className="absolute top-0 bottom-0 right-0 bg-muted/40 pointer-events-none timeline-past-end"
+            />
             {renderRulerTicks()}
             {/* Top Scrubber Diamond Head */}
             <div
@@ -882,8 +934,14 @@ export const Timeline: React.FC<TimelineProps> = ({
 
             {renderMarquee()}
 
-            {/* Tracks Content Area */}
-            <div className="divide-y divide-border">
+            {/* Past the end of the project: no track, so it doesn't look like keyframes fit there */}
+            <div
+              style={{ left: `${totalWidth}px` }}
+              className="absolute top-0 bottom-0 right-0 border-l border-border bg-muted/40 pointer-events-none timeline-past-end"
+            />
+
+            {/* Tracks Content Area (ends where the project ends) */}
+            <div style={{ width: `${totalWidth}px` }} className="divide-y divide-border border-b border-border">
               {project.layers.map((layer) => {
                 const isSelected = selectedLayerIds.includes(layer.id);
                 const range = getLayerKeyframeRange(layer);
@@ -911,7 +969,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                           }`}
                           onMouseDown={(e) => handleLayerBarMouseDown(e, layer.id)}
                           onContextMenu={(e) => handleBarContextMenu(e, layer.id)}
-                          data-tooltip={"Arrastra para mover todos los fotogramas clave de la capa\nArrastra un extremo para estirar o encoger la animación\nClic derecho para copiar o pegar"}
+                          data-tooltip={"Arrastra para mover todos los fotogramas clave de la capa\nArrastra un extremo para estirar o encoger la animación\nShift o Ctrl + clic para seleccionar varias barras\nClic derecho para copiar o pegar"}
                         >
                           {/* Ends: stretch the animation, spreading the keyframes proportionally */}
                           {range.end > range.start &&
