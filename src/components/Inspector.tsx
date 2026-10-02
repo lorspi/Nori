@@ -43,6 +43,7 @@ import {
 } from '../types/animation';
 import { AlignMode } from '../utils/alignment';
 import { ScrubLabel } from './ScrubLabel';
+import { NumberInput } from './NumberInput';
 import { getLayerPropertiesAtTime } from '../utils/interpolator';
 import { CurveEditor } from './CurveEditor';
 import { Dropdown } from './Dropdown';
@@ -67,6 +68,8 @@ interface InspectorProps {
   // Records one undo step before a label drag (scrub) starts
   onStartScrub: () => void;
   onToggleAnimation: (layerId: string, properties: AnimatableProperty[]) => void;
+  // Removes the blur effect (and its animation) from the layers
+  onRemoveBlur: (layerIds: string[]) => void;
   // Vertex editing (basic shapes are converted to a path first)
   vertexEditLayerId: string | null;
   onToggleVertexEdit: (layerId: string) => void;
@@ -79,6 +82,8 @@ interface InspectorProps {
   // Align / distribute the selected layers (a single layer aligns to the canvas)
   onAlignLayers: (mode: AlignMode) => void;
   // Boolean groups: change the operation, flatten into a path, take the shapes out
+  // What the boolean buttons can do with the selection (the same as in the top bar)
+  booleanState: { canCombine: boolean; activeOp: BooleanOperation | null; canFlatten: boolean };
   onBooleanOperation: (op: BooleanOperation) => void;
   onFlattenBoolean: (layerId: string) => void;
   onUngroupBoolean: (layerId: string) => void;
@@ -160,6 +165,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   onRenameLayer,
   onStartScrub,
   onToggleAnimation,
+  onRemoveBlur,
   vertexEditLayerId,
   onToggleVertexEdit,
   onUpdateKeyframesEasing,
@@ -168,6 +174,7 @@ export const Inspector: React.FC<InspectorProps> = ({
   onDeleteLayer,
   onDuplicateLayer,
   onAlignLayers,
+  booleanState,
   onBooleanOperation,
   onFlattenBoolean,
   onUngroupBoolean,
@@ -175,6 +182,8 @@ export const Inspector: React.FC<InspectorProps> = ({
   currentTime,
 }) => {
   const [aspectLocked, setAspectLocked] = useState(true);
+  // Layers whose blur was just added: the field stays while its value is 0 (e.g. typing "0,5")
+  const [blurAddedIds, setBlurAddedIds] = useState<string[]>([]);
   // Last color of each removed fill / stroke, restored when it's added back
   const lastColors = useRef<Record<string, string>>({});
 
@@ -242,10 +251,11 @@ export const Inspector: React.FC<InspectorProps> = ({
               >
                 Ancho (px)
               </ScrubLabel>
-              <input
-                type="number"
+              <NumberInput
                 value={project.width}
-                onChange={(e) => onUpdateProjectSettings({ width: Number(e.target.value) })}
+                min={1}
+                commitOnBlur
+                onChange={(v) => onUpdateProjectSettings({ width: Math.round(v) })}
                 className="w-full bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
               />
             </div>
@@ -259,10 +269,11 @@ export const Inspector: React.FC<InspectorProps> = ({
               >
                 Alto (px)
               </ScrubLabel>
-              <input
-                type="number"
+              <NumberInput
                 value={project.height}
-                onChange={(e) => onUpdateProjectSettings({ height: Number(e.target.value) })}
+                min={1}
+                commitOnBlur
+                onChange={(v) => onUpdateProjectSettings({ height: Math.round(v) })}
                 className="w-full bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
               />
             </div>
@@ -282,13 +293,13 @@ export const Inspector: React.FC<InspectorProps> = ({
                 Duración (s)
               </ScrubLabel>
               <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  step="0.5"
-                  min="0.5"
-                  max="60"
+                <NumberInput
+                  step={0.5}
+                  min={0.5}
+                  max={60}
+                  commitOnBlur
                   value={project.duration}
-                  onChange={(e) => onUpdateProjectSettings({ duration: Number(e.target.value) })}
+                  onChange={(v) => onUpdateProjectSettings({ duration: v })}
                   className="w-full min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
                 />
                 <button
@@ -329,9 +340,27 @@ export const Inspector: React.FC<InspectorProps> = ({
               <HexColorInput
                 value={project.backgroundColor}
                 onChange={(color, recordUndo) => onUpdateProjectSettings({ backgroundColor: color }, recordUndo)}
-                className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
+                emptyValue="transparent"
+                placeholder="Sin fondo"
+                className="flex-1 min-w-0 bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground placeholder:text-muted-foreground"
                 ariaLabel="Color de fondo"
               />
+              {/* Without a background the canvas is transparent (checkerboard) */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (isNoColor(project.backgroundColor)) {
+                    onUpdateProjectSettings({ backgroundColor: lastColors.current.background ?? '#ffffff' });
+                  } else {
+                    lastColors.current.background = project.backgroundColor;
+                    onUpdateProjectSettings({ backgroundColor: 'transparent' });
+                  }
+                }}
+                className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
+                data-tooltip={isNoColor(project.backgroundColor) ? 'Añadir fondo' : 'Quitar fondo (lienzo transparente)'}
+              >
+                {isNoColor(project.backgroundColor) ? <Plus className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+              </button>
             </div>
           </div>
 
@@ -348,6 +377,8 @@ export const Inspector: React.FC<InspectorProps> = ({
   const keyframeRange = getLayerKeyframeRange(selectedLayer);
   const layerId = selectedLayer.id;
   const isBooleanGroup = selectedLayer.type === 'boolean';
+  // Several layers selected: the boolean buttons combine them into a new group
+  const combinesSelection = selectedLayerIds.length > 1 && selectedLayerIds.includes(layerId);
   // A shape inside a boolean group: it is drawn with the group's fill, stroke, opacity and effects
   const booleanParent = getLayer(project.layers, selectedLayer.parentId);
 
@@ -360,6 +391,9 @@ export const Inspector: React.FC<InspectorProps> = ({
   // Color changes apply to every selected layer when the Inspector's layer is part of the selection
   const fillTargets = selectedLayerIds.includes(layerId) ? selectedLayerIds : [layerId];
   const alignCount = fillTargets.length;
+  // The blur effect is shown once added (like the shadows): with a value, animated or just added
+  const hasBlur =
+    selectedLayer.tracks.some((t) => t.property === 'blur') || (p.blur ?? 0) > 0 || blurAddedIds.includes(layerId);
 
   // Keyframe icon: gray = not animated, blue = animated (filled when a keyframe sits on the current frame)
   const renderAnimToggle = (properties: AnimatableProperty[], label: string) => {
@@ -405,15 +439,11 @@ export const Inspector: React.FC<InspectorProps> = ({
       >
         <DropHalf className="w-3 h-3" />
       </ScrubLabel>
-      <input
-        type="number"
-        min="0"
-        max="100"
+      <NumberInput
+        min={0}
+        max={100}
         value={percent}
-        onChange={(e) => {
-          if (e.target.value === '') return;
-          onChange(Number(e.target.value));
-        }}
+        onChange={(v) => onChange(v)}
         className="w-full min-w-0 bg-transparent text-right font-mono text-foreground focus:outline-none"
         aria-label={label}
       />
@@ -442,15 +472,11 @@ export const Inspector: React.FC<InspectorProps> = ({
         >
           {fieldLabel}
         </ScrubLabel>
-        <input
-          type="number"
+        <NumberInput
           min={min}
+          step={0.5}
           value={Number(current[prop].toFixed(1))}
-          onChange={(e) => {
-            if (e.target.value === '') return;
-            const v = Number(e.target.value);
-            update({ [prop]: min !== undefined ? Math.max(min, v) : v });
-          }}
+          onChange={(v) => update({ [prop]: min !== undefined ? Math.max(min, v) : v })}
           className="w-full min-w-0 bg-transparent text-right font-mono text-foreground focus:outline-none"
           aria-label={title}
         />
@@ -590,15 +616,12 @@ export const Inspector: React.FC<InspectorProps> = ({
         >
           {label}
         </ScrubLabel>
-        <input
-          type="number"
+        <NumberInput
           min={min}
           max={max}
+          step={step}
           value={shown}
-          onChange={(e) => {
-            if (e.target.value === '') return;
-            onUpdateLayerProperty(layerId, prop, toStored(Number(e.target.value)));
-          }}
+          onChange={(v) => onUpdateLayerProperty(layerId, prop, toStored(v))}
           className="w-full min-w-0 bg-transparent text-right font-mono text-foreground focus:outline-none"
           aria-label={label}
         />
@@ -637,17 +660,15 @@ export const Inspector: React.FC<InspectorProps> = ({
           </ScrubLabel>
         )}
         {keyframeRange ? (
-          <input
-            type="number"
+          <NumberInput
             step={0.1}
             min={min}
             max={max}
             value={shown}
             disabled={disabled}
-            onChange={(e) => {
-              if (e.target.value === '') return;
-              apply(Number(e.target.value));
-            }}
+            // Applied on Enter / blur: a "0" typed on the way to "0,5" would squash the keyframes
+            commitOnBlur
+            onChange={(v) => apply(v)}
             className="w-full min-w-0 bg-transparent text-right font-mono text-foreground focus:outline-none disabled:cursor-default"
             aria-label={label}
           />
@@ -720,23 +741,23 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
         </div>
 
-        {/* Boolean group: operation, flatten and ungroup */}
-        {isBooleanGroup && (
+        {/* Boolean operation: combines the selected shapes, or changes the selected group's operation */}
+        {(booleanState.activeOp || (combinesSelection && booleanState.canCombine)) && (
           <div>
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-              Operación booleana
+              {combinesSelection ? `Combinar ${selectedLayerIds.length} capas` : 'Operación booleana'}
             </span>
             <div className="flex items-center bg-secondary border border-border rounded-md p-0.5 gap-0.5">
               {BOOLEAN_OPERATIONS.map((op) => {
                 const Icon = BOOLEAN_ICONS[op];
-                const active = (selectedLayer.booleanOp ?? 'union') === op;
+                const active = booleanState.activeOp === op;
                 return (
                   <button
                     key={op}
                     type="button"
                     onClick={() => onBooleanOperation(op)}
                     className={`flex-1 h-7 flex items-center justify-center rounded transition-colors ${
-                      active ? 'bg-card text-bento-blue shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                      active ? 'bg-card text-bento-blue shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                     }`}
                     data-tooltip={`${BOOLEAN_LABELS[op].name}: ${BOOLEAN_LABELS[op].description.toLowerCase()}`}
                     data-shortcut={BOOLEAN_LABELS[op].shortcut}
@@ -748,31 +769,42 @@ export const Inspector: React.FC<InspectorProps> = ({
                 );
               })}
             </div>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              <button
-                type="button"
-                onClick={() => onFlattenBoolean(layerId)}
-                className="flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
-                data-tooltip="Convierte el grupo en un solo trazado con su forma en el fotograma actual"
-                data-shortcut="Ctrl+E"
-              >
-                <PathIcon className="w-3 h-3" />
-                <span>Aplanar</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onUngroupBoolean(layerId)}
-                className="flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
-                data-tooltip="Saca las formas del grupo, donde se ven ahora, y elimina el grupo"
-              >
-                <SelectionSlash className="w-3 h-3" />
-                <span>Desagrupar</span>
-              </button>
-            </div>
-            <p className="text-[10px] text-muted-foreground leading-snug mt-1.5">
-              Las formas del grupo siguen siendo editables y animables: haz doble clic en el lienzo para seleccionar
-              una, o elígela en la línea del tiempo. El relleno, el trazo y los efectos son los del grupo.
-            </p>
+            {combinesSelection && (
+              <p className="text-[10px] text-muted-foreground leading-snug mt-1.5">
+                Combina las formas seleccionadas en un grupo booleano. Las formas siguen siendo editables y animables
+                dentro del grupo.
+              </p>
+            )}
+            {/* Boolean group: flatten and ungroup */}
+            {isBooleanGroup && !combinesSelection && (
+              <>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => onFlattenBoolean(layerId)}
+                    className="flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
+                    data-tooltip="Convierte el grupo en un solo trazado con su forma en el fotograma actual"
+                    data-shortcut="Ctrl+E"
+                  >
+                    <PathIcon className="w-3 h-3" />
+                    <span>Aplanar</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUngroupBoolean(layerId)}
+                    className="flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
+                    data-tooltip="Saca las formas del grupo, donde se ven ahora, y elimina el grupo"
+                  >
+                    <SelectionSlash className="w-3 h-3" />
+                    <span>Desagrupar</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground leading-snug mt-1.5">
+                  Las formas del grupo siguen siendo editables y animables: haz doble clic en el lienzo para seleccionar
+                  una, o elígela en la línea del tiempo. El relleno, el trazo y los efectos son los del grupo.
+                </p>
+              </>
+            )}
           </div>
         )}
 
@@ -871,10 +903,9 @@ export const Inspector: React.FC<InspectorProps> = ({
                 >
                   X
                 </ScrubLabel>
-                <input
-                  type="number"
+                <NumberInput
                   value={Math.round(p.x)}
-                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'x', Number(e.target.value))}
+                  onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'x', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
                   data-tooltip="Posición X"
                 />
@@ -888,10 +919,9 @@ export const Inspector: React.FC<InspectorProps> = ({
                 >
                   Y
                 </ScrubLabel>
-                <input
-                  type="number"
+                <NumberInput
                   value={Math.round(p.y)}
-                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'y', Number(e.target.value))}
+                  onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'y', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
                   data-tooltip="Posición Y"
                 />
@@ -928,10 +958,9 @@ export const Inspector: React.FC<InspectorProps> = ({
                 >
                   Ax
                 </ScrubLabel>
-                <input
-                  type="number"
+                <NumberInput
                   value={Math.round(p.anchorX || 0)}
-                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'anchorX', Number(e.target.value))}
+                  onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'anchorX', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
                   data-tooltip="Punto de anclaje X (horizontal)"
                 />
@@ -945,10 +974,9 @@ export const Inspector: React.FC<InspectorProps> = ({
                 >
                   Ay
                 </ScrubLabel>
-                <input
-                  type="number"
+                <NumberInput
                   value={Math.round(p.anchorY || 0)}
-                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'anchorY', Number(e.target.value))}
+                  onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'anchorY', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
                   data-tooltip="Punto de anclaje Y (vertical)"
                 />
@@ -972,10 +1000,9 @@ export const Inspector: React.FC<InspectorProps> = ({
                 >
                   W
                 </ScrubLabel>
-                <input
-                  type="number"
+                <NumberInput
                   value={Math.round((p.scaleX ?? 1) * 100)}
-                  onChange={(e) => setScale('scaleX', Number(e.target.value))}
+                  onChange={(v) => setScale('scaleX', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
                 />
                 <span className="text-muted-foreground font-mono text-[10px]">%</span>
@@ -1002,10 +1029,9 @@ export const Inspector: React.FC<InspectorProps> = ({
                 >
                   H
                 </ScrubLabel>
-                <input
-                  type="number"
+                <NumberInput
                   value={Math.round((p.scaleY ?? 1) * 100)}
-                  onChange={(e) => setScale('scaleY', Number(e.target.value))}
+                  onChange={(v) => setScale('scaleY', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
                 />
                 <span className="text-muted-foreground font-mono text-[10px]">%</span>
@@ -1029,10 +1055,9 @@ export const Inspector: React.FC<InspectorProps> = ({
                 >
                   ∡
                 </ScrubLabel>
-                <input
-                  type="number"
+                <NumberInput
                   value={Math.round(p.rotation || 0)}
-                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'rotation', Number(e.target.value))}
+                  onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'rotation', v)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
                 />
                 <span className="text-muted-foreground font-mono text-[10px]">°</span>
@@ -1055,12 +1080,11 @@ export const Inspector: React.FC<InspectorProps> = ({
                 >
                   Op
                 </ScrubLabel>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
+                <NumberInput
+                  min={0}
+                  max={100}
                   value={Math.round((p.opacity ?? 1) * 100)}
-                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'opacity', Number(e.target.value) / 100)}
+                  onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'opacity', v / 100)}
                   className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
                 />
                 <span className="text-muted-foreground font-mono text-[10px]">%</span>
@@ -1142,17 +1166,40 @@ export const Inspector: React.FC<InspectorProps> = ({
         {/* Effects (a shape inside a boolean group uses the group's) */}
         {!booleanParent && (
         <div className="pt-2 border-t border-border space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Efectos</span>
-            {renderAnimToggle(['blur'], 'desenfoque')}
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">Efectos</span>
+          {/* Blur: added and removed like the shadows */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-muted-foreground font-medium">Desenfoque</span>
+              <div className="flex items-center gap-1">
+                {hasBlur && renderAnimToggle(['blur'], 'desenfoque')}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (hasBlur) {
+                      setBlurAddedIds((ids) => ids.filter((id) => !fillTargets.includes(id)));
+                      onRemoveBlur(fillTargets);
+                    } else {
+                      setBlurAddedIds((ids) => [...ids, ...fillTargets]);
+                      onUpdateLayerProperty(fillTargets, 'blur', 4);
+                    }
+                  }}
+                  className="p-0.5 rounded text-muted-foreground hover:text-foreground"
+                  data-tooltip={hasBlur ? 'Quitar desenfoque' : 'Añadir desenfoque'}
+                >
+                  {hasBlur ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                </button>
+              </div>
+            </div>
+            {hasBlur &&
+              renderNumberField('blur', 'Radio', Number((p.blur || 0).toFixed(1)), {
+                min: 0,
+                max: 200,
+                step: 0.5,
+                unit: 'px',
+                title: 'Desenfoque gaussiano',
+              })}
           </div>
-          {renderNumberField('blur', 'Desenfoque', Number((p.blur || 0).toFixed(1)), {
-            min: 0,
-            max: 200,
-            step: 0.5,
-            unit: 'px',
-            title: 'Desenfoque gaussiano',
-          })}
           {renderShadow('dropShadow', 'Sombra paralela')}
           {selectedLayer.type !== 'text' && renderShadow('innerShadow', 'Sombra interna')}
         </div>
@@ -1181,10 +1228,9 @@ export const Inspector: React.FC<InspectorProps> = ({
                 >
                   Tamaño
                 </ScrubLabel>
-                <input
-                  type="number"
+                <NumberInput
                   value={p.fontSize || 32}
-                  onChange={(e) => onUpdateLayerProperty(selectedLayer.id, 'fontSize', Number(e.target.value))}
+                  onChange={(v) => onUpdateLayerProperty(selectedLayer.id, 'fontSize', v)}
                   className="w-full bg-secondary border border-border rounded-md px-2 h-7 font-mono text-foreground"
                 />
               </div>
@@ -1248,12 +1294,11 @@ export const Inspector: React.FC<InspectorProps> = ({
               >
                 Grosor
               </ScrubLabel>
-              <input
-                type="number"
-                min="0"
-                step="0.5"
+              <NumberInput
+                min={0}
+                step={0.5}
                 value={Number((p.strokeWidth || 0).toFixed(2))}
-                onChange={(e) => onUpdateLayerProperty(fillTargets, 'strokeWidth', Math.max(0, Number(e.target.value)))}
+                onChange={(v) => onUpdateLayerProperty(fillTargets, 'strokeWidth', Math.max(0, v))}
                 className="w-full bg-transparent text-right font-mono text-foreground focus:outline-none"
                 data-tooltip="Grosor del trazo"
               />

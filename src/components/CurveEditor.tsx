@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Stop } from '@phosphor-icons/react';
 import { EasingConfig } from '../types/animation';
 import { ScrubLabel } from './ScrubLabel';
+import { NumberInput } from './NumberInput';
 import { Dropdown } from './Dropdown';
 import { evaluateEasing, getBounceSegments, getEasingBezier } from '../utils/interpolator';
 import {
@@ -322,11 +323,10 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
       >
         {label}
       </ScrubLabel>
-      <input
-        type="number"
-        step="0.05"
+      <NumberInput
+        step={0.05}
         value={bezier![param]}
-        onChange={(e) => setBezierParam(param, Number(e.target.value))}
+        onChange={(v) => setBezierParam(param, v)}
         className="w-full min-w-0 bg-card border border-border rounded-md px-1 py-0.5 text-right text-foreground"
       />
     </div>
@@ -506,11 +506,10 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
             >
               Stiffness (Rigidez)
             </ScrubLabel>
-            <input
-              type="number"
-              step="5"
+            <NumberInput
+              step={5}
               value={easing.spring.stiffness}
-              onChange={(e) => setSpringParam('stiffness', Number(e.target.value))}
+              onChange={(v) => setSpringParam('stiffness', v)}
               className={fieldClass}
             />
           </div>
@@ -524,11 +523,10 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
             >
               Damping (Fricción)
             </ScrubLabel>
-            <input
-              type="number"
-              step="0.5"
+            <NumberInput
+              step={0.5}
               value={easing.spring.damping}
-              onChange={(e) => setSpringParam('damping', Number(e.target.value))}
+              onChange={(v) => setSpringParam('damping', v)}
               className={fieldClass}
             />
           </div>
@@ -543,12 +541,11 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
             >
               Mass (Masa)
             </ScrubLabel>
-            <input
-              type="number"
-              step="0.1"
-              min="0.1"
+            <NumberInput
+              step={0.1}
+              min={0.1}
               value={easing.spring.mass}
-              onChange={(e) => setSpringParam('mass', Number(e.target.value))}
+              onChange={(v) => setSpringParam('mass', v)}
               className={fieldClass}
             />
           </div>
@@ -570,13 +567,12 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
             >
               Rebotes
             </ScrubLabel>
-            <input
-              type="number"
-              step="1"
-              min="1"
-              max="8"
+            <NumberInput
+              step={1}
+              min={1}
+              max={8}
               value={getBounceConfig(easing).bounces}
-              onChange={(e) => setBounceParam('bounces', Number(e.target.value))}
+              onChange={(v) => setBounceParam('bounces', v)}
               className={fieldClass}
             />
           </div>
@@ -592,13 +588,12 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
             >
               Elasticidad
             </ScrubLabel>
-            <input
-              type="number"
-              step="0.05"
-              min="0.05"
-              max="0.9"
+            <NumberInput
+              step={0.05}
+              min={0.05}
+              max={0.9}
               value={getBounceConfig(easing).restitution}
-              onChange={(e) => setBounceParam('restitution', Number(e.target.value))}
+              onChange={(v) => setBounceParam('restitution', v)}
               className={fieldClass}
             />
           </div>

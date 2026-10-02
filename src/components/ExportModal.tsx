@@ -18,7 +18,7 @@ import { ExportFormat, ExportSettings, Project, SvgBooleanMode } from '../types/
 import { exportProject, ExportProgress, motionBlurSamples } from '../utils/videoExporter';
 import { exportToAnimatedSvg, hasAnimatedBooleanGroups } from '../utils/svgExporter';
 import { hasBooleanLayers, useBooleanEngine } from '../utils/booleanOps';
-import { ColorSwatch, HexColorInput } from './ColorSwatch';
+import { ColorSwatch, HexColorInput, isNoColor } from './ColorSwatch';
 import { Dropdown } from './Dropdown';
 
 interface ExportModalProps {
@@ -97,12 +97,15 @@ const downloadUrl = (url: string, filename: string) => {
   document.body.removeChild(a);
 };
 
+// Color for formats exported with a background (white when the project has none)
+const exportBackground = (color: string) => (isNoColor(color) ? '#ffffff' : color);
+
 export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClose }) => {
   const [format, setFormat] = useState<ExportFormat>('gif');
   const [fps, setFps] = useState<number>(project.fps || 60);
   const [scale, setScale] = useState<number>(project.width < 500 ? 2 : 1);
-  const [transparent, setTransparent] = useState<boolean>(false);
-  const [backgroundColor, setBackgroundColor] = useState<string>(project.backgroundColor || '#ffffff');
+  const [transparent, setTransparent] = useState<boolean>(isNoColor(project.backgroundColor));
+  const [backgroundColor, setBackgroundColor] = useState<string>(exportBackground(project.backgroundColor));
   const [loop] = useState<number>(0);
   // Motion blur (MP4 / WebM only): on / off and shutter intensity in %
   const [motionBlurOn, setMotionBlurOn] = useState<boolean>(false);
@@ -113,7 +116,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
     if (isOpen) {
       setFps(project.fps || 60);
       setScale(project.width < 500 ? 2 : 1);
-      setBackgroundColor(project.backgroundColor || '#ffffff');
+      setBackgroundColor(exportBackground(project.backgroundColor));
+      // A project without a background exports transparent by default
+      setTransparent(isNoColor(project.backgroundColor));
     }
   }, [isOpen, project.fps, project.width, project.backgroundColor]);
 

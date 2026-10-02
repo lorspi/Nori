@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.3.2] — 2026-10-02
+
+### Added
+
+- **Lienzo sin fondo**
+  El fondo del lienzo se puede quitar con el botón "−" junto a su color, en los Ajustes del Proyecto (con ninguna capa seleccionada), y volver a añadir con "+", que recupera el último color; también se quita borrando el valor hex. Sin fondo, el lienzo se ve siempre con el patrón de ajedrez, el botón "Transparencia" de la barra superior desaparece porque ya no hace falta y la ventana de exportar empieza con "Fondo transparente" activado; si se desactiva, el fondo es blanco.
+
+- **Ir a un tiempo exacto**
+  El tiempo del cursor, junto a los botones de reproducción, ahora es un campo: se escribe un tiempo en segundos y Enter (o salir del campo) lleva el cursor a ese momento, ajustado al fotograma más cercano y sin pasar de la duración del proyecto. Escape descarta lo escrito y las flechas arriba y abajo avanzan o retroceden 0,1 s (Shift: 1 s).
+
+### Changed
+
+- **Punto o coma como separador decimal**
+  Todos los campos numéricos (Inspector, curvas de suavizado, tiempo actual y valores de la línea del tiempo) aceptan tanto el punto como la coma para los decimales: el punto se convierte en coma al escribirlo y los valores se muestran con coma. Las flechas arriba y abajo siguen cambiando el valor (Shift: 10 veces más) y Espacio sigue reproduciendo o pausando con el foco en un campo numérico. La duración del proyecto, el ancho y el alto del lienzo y el inicio y la duración de la animación de una capa se aplican al pulsar Enter o salir del campo, para que un "0" escrito de paso (al escribir "0,5") no recorte las capas ni junte los fotogramas clave.
+
+- **El desenfoque se añade como las sombras**
+  El desenfoque deja de aparecer siempre en Efectos: ahora tiene su propio botón "+" para añadirlo (empieza en 4 px) y "−" para quitarlo, igual que la sombra paralela y la interna. Al quitarlo también se elimina su animación, en un solo paso que se deshace. Las capas que ya tenían desenfoque o lo animan lo siguen mostrando.
+
+## [1.3.1] — 2026-10-02
+
+### Added
+
+- **Valor de cada parámetro en la línea del tiempo**
+  Al desplegar una capa en la línea del tiempo, cada parámetro animado muestra a su derecha su valor en el tiempo actual, que cambia mientras se reproduce o se mueve el cursor de tiempo. El valor se arrastra a los lados para cambiarlo (más rápido con Shift) o se le hace clic para escribir uno nuevo: Enter o salir del campo lo guarda y Escape lo descarta. El cambio se guarda como fotograma clave en el fotograma actual, igual que desde el Inspector, y se deshace en un paso. Las escalas y opacidades se muestran en %, la rotación en grados y el resto en px; el relleno y el trazo muestran su color, que se cambia con un clic en la muestra.
+
+- **Operaciones booleanas desde el Inspector con varias capas seleccionadas**
+  Con dos o más formas seleccionadas, el Inspector muestra "Combinar N capas" con los botones Unir, Restar, Intersectar y Excluir, que las combinan en un grupo booleano igual que el botón de la barra superior, el menú del clic derecho o Alt + Shift + U, S, I o X.
+
+### Fixed
+
+- **Espacio para pausar**
+  A veces había que pulsar Espacio varias veces para pausar la reproducción. Ahora la animación se pausa en cuanto se pulsa la tecla, sin esperar a soltarla ni depender de cuánto dure la pulsación, y empieza a reproducirse al soltarla. Mantener Espacio pulsado para arrastrar el lienzo sigue sin cambiar la reproducción.
+
 ## [1.3.0] — 2026-10-02
 
 ### Added

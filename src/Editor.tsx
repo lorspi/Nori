@@ -16,6 +16,7 @@ import { TopBar, ToolMode, ShapeType } from './components/TopBar';
 import { DEFAULT_SHAPE, getShapePathData, normalizePathData } from './utils/pathGeometry';
 import { CanvasView } from './components/CanvasView';
 import { Inspector } from './components/Inspector';
+import { isNoColor } from './components/ColorSwatch';
 import { Timeline } from './components/Timeline';
 import { ExportModal } from './components/ExportModal';
 import { AnimationPresetsModal } from './components/AnimationPresetsModal';
@@ -76,8 +77,6 @@ import {
   topLevelIds,
 } from './utils/layerTree';
 
-// Longest Space press that still counts as a tap (toggles playback); longer presses pan the canvas
-const SPACE_TAP_MAX_MS = 400;
 // Input types where Space types nothing, so it can still toggle playback
 const NON_TEXT_INPUT_TYPES = new Set(['number', 'range', 'color']);
 
@@ -164,8 +163,9 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
   const canvasMenuTokenRef = useRef(0);
 
   const lastFrameTimeRef = useRef<number | null>(null);
-  // Space: a short tap toggles playback; holding it pans the canvas
-  const spacePressRef = useRef<{ start: number; held: boolean } | null>(null);
+  // Space: pressing it pauses, releasing it plays; holding it to drag the canvas does neither.
+  // paused: this press paused playback · held: the canvas was dragged during the press
+  const spacePressRef = useRef<{ held: boolean; paused: boolean } | null>(null);
   const projectRef = useRef<Project>(project);
   projectRef.current = project;
 
@@ -321,7 +321,10 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
       const target = e.target as HTMLElement;
       const isTextField =
         ['SELECT', 'TEXTAREA'].includes(target.tagName) ||
-        (target instanceof HTMLInputElement && !NON_TEXT_INPUT_TYPES.has(target.type));
+        (target instanceof HTMLInputElement &&
+          !NON_TEXT_INPUT_TYPES.has(target.type) &&
+          // Numeric fields (NumberInput): Space types nothing in them either
+          target.dataset.numeric === undefined);
       if (isTextField || (target.tagName === 'INPUT' && e.code !== 'Space')) {
         return;
       }
@@ -404,10 +407,12 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
 
       if (e.code === 'Space') {
         e.preventDefault();
-        // Playback toggles on release, only after a short tap (see the keyup handler).
-        // Auto-repeat is ignored: its delay depends on the OS and can be shorter than a tap.
+        // Auto-repeat is ignored: its delay depends on the OS
         if (!e.repeat || !spacePressRef.current) {
-          spacePressRef.current = { start: e.timeStamp, held: false };
+          // Pressing Space pauses right away; playback starts on release (see the keyup
+          // handler), so holding Space to pan the canvas doesn't start it
+          spacePressRef.current = { held: false, paused: isPlaying };
+          if (isPlaying) setIsPlaying(false);
         }
       } else if (e.code === 'KeyV') {
         setActiveTool('select');
@@ -438,23 +443,23 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
       }
     };
 
-    // Space released: toggle playback only if it was a short tap, not held down to pan
+    // Space released: start playback, unless the press paused it or was used to pan the canvas
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code !== 'Space') return;
       const press = spacePressRef.current;
       spacePressRef.current = null;
       if (!press) return;
       e.preventDefault();
-      // Event timestamps, not the handler's run time: during playback the main thread
-      // is busy rendering and the handlers can run late
-      if (!press.held && e.timeStamp - press.start < SPACE_TAP_MAX_MS) {
-        setIsPlaying((prev) => !prev);
-      }
+      if (!press.held && !press.paused) setIsPlaying(true);
     };
 
-    // Clicking while Space is down (to drag the canvas) means it is being held
+    // Clicking while Space is down (to drag the canvas) means it is being held to pan:
+    // playback goes on as it was
     const handlePointerDown = () => {
-      if (spacePressRef.current) spacePressRef.current.held = true;
+      const press = spacePressRef.current;
+      if (!press || press.held) return;
+      press.held = true;
+      if (press.paused) setIsPlaying(true);
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -713,6 +718,24 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
   // Toggle animation for a group of properties (Inspector keyframe icon).
   // Enabling creates a keyframe at the current frame with the current value;
   // disabling removes the tracks and bakes the current value into the layer.
+  // Inspector: removes the blur effect from the layers, with its animation (one undo step)
+  const handleRemoveBlur = (layerIds: string[]) => {
+    recordHistory(projectRef.current);
+    setProject((prev) => ({
+      ...prev,
+      layers: prev.layers.map((layer) =>
+        layerIds.includes(layer.id)
+          ? {
+              ...layer,
+              properties: { ...layer.properties, blur: 0 },
+              tracks: layer.tracks.filter((t) => t.property !== 'blur'),
+            }
+          : layer
+      ),
+    }));
+    setSelectedKeyframes((prev) => prev.filter((r) => !layerIds.includes(r.layerId) || r.property !== 'blur'));
+  };
+
   const handleToggleAnimation = (layerId: string, properties: AnimatableProperty[]) => {
     recordHistory(project);
 
@@ -1627,7 +1650,8 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
           activeTool={activeTool}
           zoom={zoom}
           setZoom={setZoom}
-          showCheckerboard={showCheckerboard}
+          // Without a background color the canvas is always transparent
+          showCheckerboard={showCheckerboard || isNoColor(project.backgroundColor)}
         />
 
         <Inspector
@@ -1640,6 +1664,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
           onRenameLayer={handleRenameLayer}
           onStartScrub={handleStartDrag}
           onToggleAnimation={handleToggleAnimation}
+          onRemoveBlur={handleRemoveBlur}
           vertexEditLayerId={vertexEditLayerId}
           onToggleVertexEdit={handleToggleVertexEdit}
           onUpdateKeyframesEasing={handleUpdateKeyframesEasing}
@@ -1659,6 +1684,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
           onDeleteLayer={handleDeleteLayer}
           onDuplicateLayer={handleDuplicateLayer}
           onAlignLayers={handleAlignLayers}
+          booleanState={booleanState}
           onBooleanOperation={handleBooleanOperation}
           onFlattenBoolean={(id) => handleFlattenBoolean(id)}
           onUngroupBoolean={(id) => handleUngroupBoolean(id)}
@@ -1685,6 +1711,8 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
         onToggleLayerExpanded={handleToggleLayerExpanded}
         onMoveLayer={handleMoveLayer}
         onAddKeyframe={handleAddKeyframe}
+        onUpdateLayerProperty={handleUpdateLayerProperty}
+        onStartScrub={handleStartDrag}
         onDeleteKeyframes={handleDeleteKeyframes}
         onMoveKeyframes={handleMoveKeyframes}
         onSetKeyframeTimes={handleSetKeyframeTimes}

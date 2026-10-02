@@ -28,6 +28,9 @@ import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { getAncestors } from '../utils/layerTree';
 import { BOOLEAN_LABELS, LayerDropPosition } from '../utils/booleanGroups';
 import { BOOLEAN_ICONS } from './booleanIcons';
+import { TrackValue } from './TrackValue';
+import { NumberInput } from './NumberInput';
+import { getLayerPropertiesAtTime } from '../utils/interpolator';
 
 interface TimelineProps {
   project: Project;
@@ -47,6 +50,9 @@ interface TimelineProps {
   // A row dragged before / after another one, or into a boolean group
   onMoveLayer: (layerId: string, refId: string, position: LayerDropPosition) => void;
   onAddKeyframe: (layerId: string, property: AnimatableProperty, time: number) => void;
+  // Value typed or dragged in a parameter row (written as a keyframe at the current frame)
+  onUpdateLayerProperty: (layerId: string, property: AnimatableProperty, value: number | string, recordUndo: boolean) => void;
+  onStartScrub: () => void;
   onDeleteKeyframes: (refs: KeyframeRef[]) => void;
   onMoveKeyframes: (base: (KeyframeRef & { time: number })[], delta: number) => void;
   onSetKeyframeTimes: (items: (KeyframeRef & { time: number })[]) => void;
@@ -129,6 +135,8 @@ export const Timeline: React.FC<TimelineProps> = ({
   onToggleLayerExpanded,
   onMoveLayer,
   onAddKeyframe,
+  onUpdateLayerProperty,
+  onStartScrub,
   onDeleteKeyframes,
   onMoveKeyframes,
   onSetKeyframeTimes,
@@ -793,10 +801,25 @@ export const Timeline: React.FC<TimelineProps> = ({
             <SkipForward className="w-3.5 h-3.5" />
           </button>
 
-          {/* Time indicator badge  */}
-          <div className="ml-3 px-2 py-0.5 rounded-md bg-bento-blue/15 border border-bento-blue/30 text-bento-blue font-mono font-medium text-xs">
-            {currentTime.toFixed(2)} s
-          </div>
+          {/* Current time: type a time and press Enter to go there */}
+          <label
+            className="ml-3 flex items-center gap-1 px-2 py-0.5 rounded-md bg-bento-blue/15 border border-bento-blue/30 text-bento-blue font-mono font-medium text-xs focus-within:border-bento-blue cursor-text"
+            data-tooltip="Escribe un tiempo y pulsa Enter para ir a él"
+          >
+            <NumberInput
+              value={currentTime}
+              decimals={2}
+              min={0}
+              max={duration}
+              step={0.1}
+              commitOnBlur
+              onChange={(time) => onSeek(snapToFrame(time, project.fps))}
+              onFocus={(e) => e.currentTarget.select()}
+              aria-label="Tiempo actual (segundos)"
+              className="w-11 bg-transparent text-right focus:outline-none"
+            />
+            <span>s</span>
+          </label>
 
           {selectedKeyframes.length > 1 && (
             <span className="ml-2 text-[10px] text-muted-foreground">
@@ -966,53 +989,65 @@ export const Timeline: React.FC<TimelineProps> = ({
                   </div>
 
                   {/* Expanded animated parameters (only properties with animation enabled) */}
-                  {layer.expanded && (
-                    <div className="bg-secondary/40">
-                      {layer.tracks.map((track) => {
-                        const frameTime = snapToFrame(currentTime, project.fps);
-                        const hasKeyframeAtCurrent = track.keyframes.some(
-                          (k) => Math.abs(k.time - frameTime) < frameTolerance(project.fps)
-                        );
-                        const label = isAnimatableProperty(track.property)
-                          ? PROPERTY_META[track.property].label
-                          : track.label;
-
-                        return (
-                          <div
-                            key={track.property}
-                            onContextMenu={(e) => handleRowContextMenu(e, layer.id)}
-                            className="h-7 pl-8 pr-2 flex items-center justify-between text-[11px] text-muted-foreground hover:bg-accent border-b border-border box-border"
-                          >
-                            <span className="truncate">{label}</span>
-
-                            <div className="flex items-center gap-1.5">
-                              {/* Add / Toggle Keyframe Diamond Button */}
-                              <button
-                                onClick={() =>
-                                  onAddKeyframe(layer.id, track.property, currentTime)
-                                }
-                                className={`p-0.5 transition-colors ${
-                                  hasKeyframeAtCurrent
-                                    ? 'text-bento-blue'
-                                    : 'text-muted-foreground/50 hover:text-foreground'
-                                }`}
-                                data-tooltip={
-                                  hasKeyframeAtCurrent
-                                    ? 'Quitar fotograma clave en el tiempo actual'
-                                    : 'Añadir fotograma clave en el tiempo actual'
-                                }
-                              >
-                                <Diamond
-                                  className="w-2.5 h-2.5"
-                                  weight={hasKeyframeAtCurrent ? 'fill' : 'regular'}
+                  {layer.expanded && (() => {
+                    const values = getLayerPropertiesAtTime(layer, currentTime);
+                    return (
+                      <div className="bg-secondary/40">
+                        {layer.tracks.map((track) => {
+                          const frameTime = snapToFrame(currentTime, project.fps);
+                          const hasKeyframeAtCurrent = track.keyframes.some(
+                            (k) => Math.abs(k.time - frameTime) < frameTolerance(project.fps)
+                          );
+                          const label = isAnimatableProperty(track.property)
+                            ? PROPERTY_META[track.property].label
+                            : track.label;
+  
+                          return (
+                            <div
+                              key={track.property}
+                              onContextMenu={(e) => handleRowContextMenu(e, layer.id)}
+                              className="h-7 pl-8 pr-2 flex items-center justify-between text-[11px] text-muted-foreground hover:bg-accent border-b border-border box-border"
+                            >
+                              <span className="truncate min-w-0">{label}</span>
+  
+                              <div className="flex items-center gap-1.5 shrink-0 pl-2">
+                                {/* Value at the current time: drag or click to edit it */}
+                                <TrackValue
+                                  property={track.property}
+                                  value={values[track.property]}
+                                  onChange={(value, recordUndo) =>
+                                    onUpdateLayerProperty(layer.id, track.property, value, recordUndo)
+                                  }
+                                  onScrubStart={onStartScrub}
                                 />
-                              </button>
+                                {/* Add / Toggle Keyframe Diamond Button */}
+                                <button
+                                  onClick={() =>
+                                    onAddKeyframe(layer.id, track.property, currentTime)
+                                  }
+                                  className={`p-0.5 transition-colors ${
+                                    hasKeyframeAtCurrent
+                                      ? 'text-bento-blue'
+                                      : 'text-muted-foreground/50 hover:text-foreground'
+                                  }`}
+                                  data-tooltip={
+                                    hasKeyframeAtCurrent
+                                      ? 'Quitar fotograma clave en el tiempo actual'
+                                      : 'Añadir fotograma clave en el tiempo actual'
+                                  }
+                                >
+                                  <Diamond
+                                    className="w-2.5 h-2.5"
+                                    weight={hasKeyframeAtCurrent ? 'fill' : 'regular'}
+                                  />
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

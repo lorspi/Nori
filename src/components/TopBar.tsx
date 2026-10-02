@@ -22,6 +22,7 @@ import { BOOLEAN_LABELS, BOOLEAN_OPERATIONS } from '../utils/booleanGroups';
 import { BOOLEAN_ICONS } from './booleanIcons';
 import ThemeToggle from './ThemeToggle';
 import { Dropdown } from './Dropdown';
+import { isNoColor } from './ColorSwatch';
 
 const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2, 4.38];
 
@@ -354,19 +355,21 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* Zone 3: Zoom, Transparency Toggle & Export */}
       <div className="flex items-center gap-2">
-        {/* Checkerboard transparency preview toggle */}
-        <button
-          onClick={() => setShowCheckerboard((prev) => !prev)}
-          className={`flex items-center gap-1 px-2 h-8 rounded-lg border text-[11px] font-mono transition-colors cursor-pointer ${
-            showCheckerboard
-              ? 'bg-bento-blue/15 border-bento-blue/40 text-bento-blue'
-              : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
-          }`}
-          data-tooltip="Alternar fondo transparente con patrón ajedrez"
-        >
-          <Grid className="w-3 h-3" />
-          <span className="hidden sm:inline">Transparencia</span>
-        </button>
+        {/* Checkerboard transparency preview toggle (without a background the canvas is always transparent) */}
+        {!isNoColor(project.backgroundColor) && (
+          <button
+            onClick={() => setShowCheckerboard((prev) => !prev)}
+            className={`flex items-center gap-1 px-2 h-8 rounded-lg border text-[11px] font-mono transition-colors cursor-pointer ${
+              showCheckerboard
+                ? 'bg-bento-blue/15 border-bento-blue/40 text-bento-blue'
+                : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+            }`}
+            data-tooltip="Alternar fondo transparente con patrón ajedrez"
+          >
+            <Grid className="w-3 h-3" />
+            <span className="hidden sm:inline">Transparencia</span>
+          </button>
+        )}
 
         {/* Zoom selector */}
         <Dropdown
