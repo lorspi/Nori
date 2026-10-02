@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Project } from '../types/animation';
 import { renderProjectFrame } from '../utils/renderer';
+import { hasBooleanLayers, useBooleanEngine } from '../utils/booleanOps';
 
 /** Frame shown while not playing: where the last animation ends, when things have settled */
 function posterTime(project: Project): number {
@@ -25,6 +26,8 @@ export const ProjectThumbnail: React.FC<ProjectThumbnailProps> = ({ project, pla
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  // Boolean groups get their stroke and shadows once paper.js has loaded
+  const booleanEngineReady = useBooleanEngine(!!project && hasBooleanLayers(project));
 
   useEffect(() => {
     const el = containerRef.current;
@@ -74,7 +77,7 @@ export const ProjectThumbnail: React.FC<ProjectThumbnailProps> = ({ project, pla
     };
     frameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameId);
-  }, [project, playing, size]);
+  }, [project, playing, size, booleanEngineReady]);
 
   return (
     <div ref={containerRef} className={`relative overflow-hidden bg-secondary ${className}`}>

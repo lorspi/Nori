@@ -25,6 +25,7 @@ En un mundo donde las herramientas de motion design suelen ser pesadas, costosas
 
 - **Lienzo vectorial** con zoom, desplazamiento, punto de anclaje y vista previa de transparencia.
 - **Capas de formas y texto**: rectángulos, cápsulas, círculos, estrellas y textos editables.
+- **Operaciones booleanas** (unir, restar, intersectar y excluir) entre formas que siguen siendo editables y animables, como en Figma.
 - **Línea de tiempo con fotogramas clave** por propiedad, arrastrables y con reproducción en bucle.
 - **Curvas de suavizado** spring, Bézier, ease-in-out, bounce y lineal, con vista previa en vivo.
 - **Importación de animaciones Lottie** y de proyectos propios, desde un botón o arrastrando el archivo.
@@ -103,6 +104,7 @@ La versión de Nori vive en `public/version.txt` y se incrusta en la aplicación
 - Phosphor Icons
 - Canvas 2D
 - gifenc
+- paper.js (operaciones booleanas, se descarga solo cuando un proyecto las usa)
 
 ## Licencia
 Nori está licenciado bajo la Licencia Apache 2.0. Ver el archivo [LICENSE](./LICENSE) para más detalles.

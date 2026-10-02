@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.3.0] — 2026-10-02
+
+### Added
+
+- **Operaciones booleanas**
+  Dos o más formas seleccionadas se combinan en un grupo booleano con Unir, Restar, Intersectar o Excluir, desde el nuevo botón de la barra superior, el menú del clic derecho o con Alt + Shift + U, S, I o X, como en Figma. Restar quita las formas de delante a la que está más atrás. El grupo se dibuja como una sola forma y toma el relleno, el trazo y los efectos de la forma que estaba más atrás; después se cambian en el Inspector como en cualquier capa, también el trazo, que recorre el contorno del resultado. Con un grupo seleccionado, el mismo botón (o los mismos atajos) cambia su operación, y el Inspector muestra las cuatro operaciones para pasar de una a otra.
+
+- **Las formas del grupo siguen siendo editables y animables**
+  El grupo tiene su propia posición, anclaje, escala, rotación y opacidad, que se animan como en cualquier capa, y cada forma de dentro conserva su animación: si un círculo se mueve sobre un cuadrado, el hueco o la unión cambian en cada fotograma. Un clic selecciona el grupo y un doble clic, la forma que está bajo el cursor; desde ahí los clics eligen entre las formas del grupo, Esc vuelve a seleccionar el grupo y un clic fuera de él sale. Con el grupo seleccionado se ven los contornos de sus formas. En la línea del tiempo, las formas aparecen debajo del grupo, con sangría, y se muestran u ocultan con su triángulo. Un grupo puede contener otros grupos para combinar operaciones distintas.
+
+- **Aplanar y desagrupar**
+  "Aplanar" (Ctrl + E) convierte el grupo en un trazado con su forma en el fotograma actual; el trazado conserva la posición, el estilo y la animación del grupo. "Desagrupar" saca las formas del grupo, en el lugar donde se ven, con su propio relleno y trazo, y elimina el grupo. Los dos están en el Inspector, en el botón de la barra superior y en el menú del clic derecho.
+
+- **Grupos booleanos en el SVG exportado**
+  Un grupo cuyas formas no se mueven entre sí se exporta como un solo trazado, aunque el grupo entero esté animado: es lo más liviano y lo que mejor se abre en Figma, Illustrator o Inkscape. Si las formas se mueven entre sí, la ventana de exportar muestra la opción "Grupos booleanos animados": Máscaras (archivo liviano y movimiento fluido; el trazo del resultado se aproxima donde las formas se cruzan), Aplanar (un solo trazado que cambia en cada fotograma: exacto y fácil de abrir en editores, pero más pesado) o Automático, que usa máscaras para los grupos sin trazo y el trazado para los que tienen trazo. El trazado animado usa SMIL, que funciona en todos los navegadores, también en Safari.
+
+- **Ordenar las capas arrastrándolas en la línea del tiempo**
+  Una fila de la lista de capas se arrastra hacia arriba o hacia abajo para cambiar su orden: una línea azul marca si quedará antes o después de la fila sobre la que se suelta (más arriba en la lista es más atrás en el lienzo). Al soltarla sobre el centro de un grupo booleano, la capa entra en el grupo, delante de sus formas; arrastrar una forma fuera del grupo la saca de él. Así también se cambia el orden de las formas dentro del grupo, lo que decide, por ejemplo, de cuál se resta el resto. La capa queda en el mismo lugar del lienzo aunque cambie de grupo, se mueve con todo lo que contiene y el cambio se deshace en un paso. Un grupo que se queda sin formas desaparece.
+
+### Changed
+
+- **Copiar, duplicar y borrar incluyen las formas del grupo**
+  Copiar, cortar, duplicar (también con Alt + arrastrar) o borrar un grupo booleano se lleva sus formas. Una forma copiada desde dentro de un grupo se pega donde se veía en el lienzo. Si se borran todas las formas de un grupo, el grupo también desaparece.
+
+- **Nori sigue cargando igual de rápido**
+  Las operaciones booleanas se calculan con paper.js, que conserva las curvas de las formas. Solo se descarga (unos 70 KB) la primera vez que se abre un proyecto con un grupo booleano; mientras tanto, el grupo se dibuja con su relleno y el trazo aparece en cuanto termina la carga.
+
+### Fixed
+
+- **Las capas desaparecían al alargar el proyecto**
+  Al aumentar la duración del proyecto, las capas dejaban de verse después de la duración original, porque seguían terminando ahí. Ahora las capas que duraban hasta el final siguen durando hasta el nuevo final, y al acortar el proyecto ninguna pasa del final. Los proyectos guardados con este problema se reparan al abrirlos.
+
+- **Punto de anclaje en el SVG exportado**
+  Las capas con el punto de anclaje fuera del centro ahora giran y se escalan alrededor de él también en el SVG exportado, igual que en el lienzo. Antes giraban alrededor del centro de la forma.
+
 ## [1.2.1] — 2026-10-02
 
 ### Added

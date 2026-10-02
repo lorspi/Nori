@@ -12,10 +12,12 @@ import {
   Trash,
   Eye,
   Wind,
+  UniteSquare,
 } from '@phosphor-icons/react';
-import { ExportFormat, ExportSettings, Project } from '../types/animation';
+import { ExportFormat, ExportSettings, Project, SvgBooleanMode } from '../types/animation';
 import { exportProject, ExportProgress, motionBlurSamples } from '../utils/videoExporter';
-import { exportToAnimatedSvg } from '../utils/svgExporter';
+import { exportToAnimatedSvg, hasAnimatedBooleanGroups } from '../utils/svgExporter';
+import { hasBooleanLayers, useBooleanEngine } from '../utils/booleanOps';
 import { ColorSwatch, HexColorInput } from './ColorSwatch';
 import { Dropdown } from './Dropdown';
 
@@ -32,6 +34,25 @@ const FORMATS: { id: ExportFormat; label: string; icon: React.ElementType; desc:
   { id: 'webm', label: 'WebM', icon: Film, desc: 'Alfa transparente' },
   { id: 'mp4', label: 'MP4', icon: Film, desc: 'Universal' },
   { id: 'svg', label: 'SVG', icon: FileCode, desc: 'Vector animado' },
+];
+
+// How boolean groups whose shapes move against each other are written in the SVG
+const SVG_BOOLEAN_OPTIONS: { value: SvgBooleanMode; label: string; description: string }[] = [
+  {
+    value: 'auto',
+    label: 'Automático',
+    description: 'Máscaras para los grupos sin trazo; trazado exacto para los que tienen trazo',
+  },
+  {
+    value: 'masks',
+    label: 'Máscaras',
+    description: 'Archivo liviano y movimiento fluido; el trazo del resultado se aproxima donde las formas se cruzan',
+  },
+  {
+    value: 'flatten',
+    label: 'Aplanar',
+    description: 'Un solo trazado que cambia en cada fotograma: exacto y fácil de abrir en editores, pero más pesado',
+  },
 ];
 
 const SCALES = [0.5, 1, 1.5, 2, 3, 4];
@@ -106,12 +127,23 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
   rendersRef.current = renders;
   useEffect(() => () => Object.values(rendersRef.current).forEach((r) => r && URL.revokeObjectURL(r.url)), []);
 
+  // Boolean groups: their geometry comes from paper.js, loaded before the SVG is generated
+  const [booleanMode, setBooleanMode] = useState<SvgBooleanMode>('auto');
+  const needsBooleanEngine = isOpen && hasBooleanLayers(project);
+  const booleanEngineReady = useBooleanEngine(needsBooleanEngine);
+  const waitingForEngine = needsBooleanEngine && !booleanEngineReady;
+  // The option only shows when some group's outline changes during the animation
+  const hasAnimatedBooleans = useMemo(
+    () => isOpen && format === 'svg' && !waitingForEngine && hasAnimatedBooleanGroups(project),
+    [isOpen, format, waitingForEngine, project]
+  );
+
   // SVG needs no rendering: it is generated live from the current settings
   const svgPreview = useMemo(() => {
-    if (!isOpen || format !== 'svg') return null;
-    const svg = exportToAnimatedSvg(project, { transparent, backgroundColor, fps });
+    if (!isOpen || format !== 'svg' || waitingForEngine) return null;
+    const svg = exportToAnimatedSvg(project, { transparent, backgroundColor, fps, booleanMode });
     return new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-  }, [isOpen, format, project, transparent, backgroundColor, fps]);
+  }, [isOpen, format, project, transparent, backgroundColor, fps, booleanMode, waitingForEngine]);
   const [svgUrl, setSvgUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!svgPreview) {
@@ -199,10 +231,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
             {svgPreview && <span className="font-mono text-muted-foreground">{formatSize(svgPreview.size)}</span>}
           </div>
           <PreviewStage transparent={transparent}>
-            {svgUrl && <img src={svgUrl} alt="Vista previa del SVG" className="max-w-full max-h-full object-contain" />}
+            {waitingForEngine ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="w-3.5 h-3.5 text-bento-blue animate-spin" />
+                <span>Preparando las operaciones booleanas…</span>
+              </div>
+            ) : (
+              svgUrl && <img src={svgUrl} alt="Vista previa del SVG" className="max-w-full max-h-full object-contain" />
+            )}
           </PreviewStage>
           <p className="text-[11px] text-muted-foreground">
-            El SVG es vectorial y se anima con CSS: no necesita renderizarse y se ve igual a cualquier tamaño.
+            El SVG es vectorial y se anima sin JavaScript: no necesita renderizarse y se ve igual a cualquier tamaño.
           </p>
         </>
       );
@@ -374,6 +413,30 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                   ariaLabel="Velocidad (FPS)"
                 />
               </div>
+
+              {/* Boolean groups whose shapes move against each other (SVG) */}
+              {isSvg && hasAnimatedBooleans && (
+                <div className="pt-3 border-t border-border space-y-1">
+                  <label className="text-muted-foreground flex items-center gap-1.5">
+                    <UniteSquare className="w-3.5 h-3.5 text-bento-blue" />
+                    <span>Grupos booleanos animados</span>
+                  </label>
+                  <Dropdown
+                    value={booleanMode}
+                    options={SVG_BOOLEAN_OPTIONS}
+                    onChange={setBooleanMode}
+                    align="left"
+                    className="w-full bg-card!"
+                    menuClassName="w-72"
+                    optionClassName=""
+                    ariaLabel="Grupos booleanos animados"
+                  />
+                  <p className="text-[10px] text-muted-foreground leading-snug">
+                    {SVG_BOOLEAN_OPTIONS.find((o) => o.value === booleanMode)?.description}. Los grupos cuyas formas no
+                    se mueven entre sí siempre se exportan como un solo trazado.
+                  </p>
+                </div>
+              )}
 
               {/* Motion blur (video formats) */}
               {isVideo && (

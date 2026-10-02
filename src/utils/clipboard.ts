@@ -158,13 +158,20 @@ const cloneTracks = (tracks: PropertyTrack[]): PropertyTrack[] =>
  */
 export function instantiateClipboardLayers(data: LayersClipboard, target: Project, withAnimation: boolean): Layer[] {
   const names = new Set(target.layers.map((l) => l.name));
+  // Layers inside a copied boolean group point to the group's new id
+  const ids = new Map(data.layers.map((l) => [l.id, newLayerId()]));
   return data.layers.map((layer, i) => {
     const fullLength = !data.sourceDuration || layer.outTime >= data.sourceDuration - 1e-3;
     const name = names.has(layer.name) ? `${layer.name} Copia` : layer.name;
     names.add(name);
+    const copy: Layer = JSON.parse(JSON.stringify(layer));
+    if (copy.parentId) {
+      if (ids.has(copy.parentId)) copy.parentId = ids.get(copy.parentId);
+      else delete copy.parentId;
+    }
     return {
-      ...JSON.parse(JSON.stringify(layer)),
-      id: newLayerId(),
+      ...copy,
+      id: ids.get(layer.id)!,
       name,
       inTime: Math.min(layer.inTime || 0, target.duration),
       outTime: fullLength ? target.duration : Math.min(layer.outTime, target.duration),

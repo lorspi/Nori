@@ -72,8 +72,13 @@ export interface PropertyTrack {
   keyframes: Keyframe[];
 }
 
-// 'capsule' and 'text' can no longer be added, but older projects and SVG imports still use them
-export type LayerType = 'rect' | 'ellipse' | 'polygon' | 'star' | 'path' | 'capsule' | 'text' | 'group';
+// 'capsule' and 'text' can no longer be added, but older projects and SVG imports still use them.
+// 'boolean' combines its child layers (the ones whose parentId points to it) into one shape.
+export type LayerType = 'rect' | 'ellipse' | 'polygon' | 'star' | 'path' | 'capsule' | 'text' | 'group' | 'boolean';
+
+// How a boolean group combines its children (as in Figma). Subtract removes every child from the
+// one at the back.
+export type BooleanOperation = 'union' | 'subtract' | 'intersect' | 'exclude';
 
 // Where the stroke sits relative to the outline
 export type StrokeAlign = 'center' | 'inside' | 'outside';
@@ -124,7 +129,11 @@ export interface Layer {
   id: string;
   name: string;
   type: LayerType;
+  // Boolean group that holds the layer. Its position, rotation and scale are relative to the group,
+  // and its fill, stroke and effects are not drawn (the group's are).
   parentId?: string;
+  // Operation of a 'boolean' layer
+  booleanOp?: BooleanOperation;
   visible: boolean;
   locked: boolean;
   inTime: number;  // start time in seconds
@@ -158,6 +167,11 @@ export interface ExportSettings {
   // (0 = off, 0.5 = 180°, 1 = 360°)
   motionBlur?: number;
 }
+
+// SVG export of boolean groups whose shapes move against each other: SVG masks (light and smooth,
+// the stroke of the result is approximated), one path per sample (exact, heavier) or, by default,
+// whichever fits each group best
+export type SvgBooleanMode = 'auto' | 'masks' | 'flatten';
 
 // Reference to a single keyframe inside a layer's property track
 export interface KeyframeRef {

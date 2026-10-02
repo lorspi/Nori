@@ -22,10 +22,25 @@ import {
   Plus,
   PencilSimple,
   Polygon as PolygonIcon,
+  Path as PathIcon,
+  SelectionSlash,
+  ArrowElbowLeftUp,
 } from '@phosphor-icons/react';
+import { BOOLEAN_LABELS, BOOLEAN_OPERATIONS } from '../utils/booleanGroups';
+import { getLayer } from '../utils/layerTree';
+import { BOOLEAN_ICONS } from './booleanIcons';
 import { ColorSwatch, HexColorInput, isNoColor } from './ColorSwatch';
 import { DEFAULT_SHAPE } from '../utils/pathGeometry';
-import { Layer, Project, EasingConfig, AnimatableProperty, KeyframeRef, ShadowEffect, StrokeAlign } from '../types/animation';
+import {
+  Layer,
+  Project,
+  EasingConfig,
+  AnimatableProperty,
+  BooleanOperation,
+  KeyframeRef,
+  ShadowEffect,
+  StrokeAlign,
+} from '../types/animation';
 import { AlignMode } from '../utils/alignment';
 import { ScrubLabel } from './ScrubLabel';
 import { getLayerPropertiesAtTime } from '../utils/interpolator';
@@ -63,6 +78,11 @@ interface InspectorProps {
   onDuplicateLayer: (layerId: string) => void;
   // Align / distribute the selected layers (a single layer aligns to the canvas)
   onAlignLayers: (mode: AlignMode) => void;
+  // Boolean groups: change the operation, flatten into a path, take the shapes out
+  onBooleanOperation: (op: BooleanOperation) => void;
+  onFlattenBoolean: (layerId: string) => void;
+  onUngroupBoolean: (layerId: string) => void;
+  onSelectLayer: (layerId: string) => void;
   currentTime: number;
 }
 
@@ -148,6 +168,10 @@ export const Inspector: React.FC<InspectorProps> = ({
   onDeleteLayer,
   onDuplicateLayer,
   onAlignLayers,
+  onBooleanOperation,
+  onFlattenBoolean,
+  onUngroupBoolean,
+  onSelectLayer,
   currentTime,
 }) => {
   const [aspectLocked, setAspectLocked] = useState(true);
@@ -323,6 +347,9 @@ export const Inspector: React.FC<InspectorProps> = ({
   const p = getLayerPropertiesAtTime(selectedLayer, currentTime);
   const keyframeRange = getLayerKeyframeRange(selectedLayer);
   const layerId = selectedLayer.id;
+  const isBooleanGroup = selectedLayer.type === 'boolean';
+  // A shape inside a boolean group: it is drawn with the group's fill, stroke, opacity and effects
+  const booleanParent = getLayer(project.layers, selectedLayer.parentId);
 
   // Scale fields are shown in %; with the aspect lock on, both axes change together
   const setScale = (axis: 'scaleX' | 'scaleY', percent: number, recordUndo = true) => {
@@ -693,6 +720,82 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
         </div>
 
+        {/* Boolean group: operation, flatten and ungroup */}
+        {isBooleanGroup && (
+          <div>
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+              Operación booleana
+            </span>
+            <div className="flex items-center bg-secondary border border-border rounded-md p-0.5 gap-0.5">
+              {BOOLEAN_OPERATIONS.map((op) => {
+                const Icon = BOOLEAN_ICONS[op];
+                const active = (selectedLayer.booleanOp ?? 'union') === op;
+                return (
+                  <button
+                    key={op}
+                    type="button"
+                    onClick={() => onBooleanOperation(op)}
+                    className={`flex-1 h-7 flex items-center justify-center rounded transition-colors ${
+                      active ? 'bg-card text-bento-blue shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    data-tooltip={`${BOOLEAN_LABELS[op].name}: ${BOOLEAN_LABELS[op].description.toLowerCase()}`}
+                    data-shortcut={BOOLEAN_LABELS[op].shortcut}
+                    aria-label={BOOLEAN_LABELS[op].name}
+                    aria-pressed={active}
+                  >
+                    <Icon className="w-4 h-4" weight={active ? 'fill' : 'regular'} />
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => onFlattenBoolean(layerId)}
+                className="flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
+                data-tooltip="Convierte el grupo en un solo trazado con su forma en el fotograma actual"
+                data-shortcut="Ctrl+E"
+              >
+                <PathIcon className="w-3 h-3" />
+                <span>Aplanar</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onUngroupBoolean(layerId)}
+                className="flex items-center justify-center gap-1.5 px-2 h-7 rounded-md border bg-secondary border-border text-[11px] font-medium text-foreground hover:bg-accent"
+                data-tooltip="Saca las formas del grupo, donde se ven ahora, y elimina el grupo"
+              >
+                <SelectionSlash className="w-3 h-3" />
+                <span>Desagrupar</span>
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground leading-snug mt-1.5">
+              Las formas del grupo siguen siendo editables y animables: haz doble clic en el lienzo para seleccionar
+              una, o elígela en la línea del tiempo. El relleno, el trazo y los efectos son los del grupo.
+            </p>
+          </div>
+        )}
+
+        {/* A shape inside a boolean group */}
+        {booleanParent && (
+          <div className="bg-secondary border border-border rounded-md p-2 text-[11px] text-muted-foreground leading-snug space-y-1.5">
+            <p>
+              Esta forma está dentro de <span className="text-foreground font-medium">{booleanParent.name}</span>. Su
+              posición es relativa al grupo y se dibuja con el relleno, el trazo y los efectos del grupo.
+            </p>
+            <button
+              type="button"
+              onClick={() => onSelectLayer(booleanParent.id)}
+              className="flex items-center gap-1 text-bento-blue hover:underline"
+              data-tooltip="Seleccionar el grupo"
+              data-shortcut="Esc"
+            >
+              <ArrowElbowLeftUp className="w-3 h-3" />
+              <span>Seleccionar el grupo</span>
+            </button>
+          </div>
+        )}
+
         {/* Timing Section: start and length of the layer bar (editable, retimes its keyframes) */}
         <div>
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
@@ -910,8 +1013,8 @@ export const Inspector: React.FC<InspectorProps> = ({
             </div>
           </div>
 
-          {/* Rotation & Opacity */}
-          <div className="grid grid-cols-2 gap-2">
+          {/* Rotation & Opacity (a shape inside a boolean group takes the group's opacity) */}
+          <div className={`grid gap-2 ${booleanParent ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-muted-foreground font-medium">Rotación</span>
@@ -935,6 +1038,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 <span className="text-muted-foreground font-mono text-[10px]">°</span>
               </div>
             </div>
+            {!booleanParent && (
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-muted-foreground font-medium">Opacidad</span>
@@ -962,11 +1066,12 @@ export const Inspector: React.FC<InspectorProps> = ({
                 <span className="text-muted-foreground font-mono text-[10px]">%</span>
               </div>
             </div>
+            )}
           </div>
         </div>
 
-        {/* Shape geometry & vertices */}
-        {selectedLayer.type !== 'text' && (
+        {/* Shape geometry & vertices (a boolean group's shape comes from the shapes inside it) */}
+        {selectedLayer.type !== 'text' && !isBooleanGroup && (
           <div className="pt-2 border-t border-border space-y-2">
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
               Forma
@@ -1034,7 +1139,8 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
         )}
 
-        {/* Effects */}
+        {/* Effects (a shape inside a boolean group uses the group's) */}
+        {!booleanParent && (
         <div className="pt-2 border-t border-border space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Efectos</span>
@@ -1050,6 +1156,7 @@ export const Inspector: React.FC<InspectorProps> = ({
           {renderShadow('dropShadow', 'Sombra paralela')}
           {selectedLayer.type !== 'text' && renderShadow('innerShadow', 'Sombra interna')}
         </div>
+        )}
 
         {/* Text Layer specific attributes */}
         {selectedLayer.type === 'text' && (
@@ -1103,7 +1210,8 @@ export const Inspector: React.FC<InspectorProps> = ({
           </div>
         )}
 
-        {/* Fill & Stroke */}
+        {/* Fill & Stroke (a shape inside a boolean group uses the group's) */}
+        {!booleanParent && (
         <div className="pt-2 border-t border-border space-y-2">
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
             Relleno y Trazo
@@ -1168,6 +1276,7 @@ export const Inspector: React.FC<InspectorProps> = ({
             )}
           </div>
         </div>
+        )}
       </div>
     </aside>
   );

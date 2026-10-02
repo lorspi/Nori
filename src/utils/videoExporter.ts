@@ -2,6 +2,7 @@ import { ExportSettings, Project } from '../types/animation';
 import { GifEncoder } from './gifEncoder';
 import { renderProjectFrame } from './renderer';
 import { exportToAnimatedSvg } from './svgExporter';
+import { prepareBooleanEngine } from './booleanOps';
 
 export interface ExportProgress {
   frame: number;
@@ -299,6 +300,8 @@ export async function exportProject(
 ): Promise<{ blob: Blob; filename: string }> {
   const sanitize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '_');
   const baseName = sanitize(project.title) || 'nori_animation';
+  // Boolean groups need their real geometry (stroke and shadows included) in every frame
+  await prepareBooleanEngine(project);
 
   switch (settings.format) {
     case 'gif': {

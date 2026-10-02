@@ -41,6 +41,17 @@ import {
   serializePath,
   setVertexMirroring,
 } from '../utils/pathGeometry';
+import {
+  Affine,
+  affineScale,
+  applyAffine,
+  getLayer,
+  getParentWorldMatrix,
+  invertAffine,
+  isLayerLocked,
+  isLayerShown,
+} from '../utils/layerTree';
+import { hasBooleanLayers, useBooleanEngine } from '../utils/booleanOps';
 import { ToolMode } from './TopBar';
 import { X, Question, BezierCurve, LineSegment } from '@phosphor-icons/react';
 
@@ -109,7 +120,8 @@ type Drag =
   | {
       kind: 'move';
       startMouse: Point;
-      members: { id: string; x: number; y: number }[];
+      // inverse: canvas → the space each layer lives in (its group's coordinates)
+      members: { id: string; x: number; y: number; inverse: Affine }[];
       primaryId: string;
       // Alt was held: the layers are copied once the drag starts (duplicated: already done)
       duplicate: boolean;
@@ -122,8 +134,9 @@ type Drag =
   | { kind: 'anchor'; layerId: string }
   | { kind: 'scale'; layerId: string; handle: SelectionHandle; start: LayerProperties }
   | { kind: 'rotate'; layerId: string; start: LayerProperties; startMouse: Point }
-  | { kind: 'groupScale'; members: GroupMember[]; box: Box; handle: SelectionHandle }
-  | { kind: 'groupRotate'; members: GroupMember[]; box: Box; startMouse: Point }
+  // Several layers of one space: box, handle and mouse are in that space (inverse: canvas → space)
+  | { kind: 'groupScale'; members: GroupMember[]; box: Box; handle: SelectionHandle; inverse: Affine }
+  | { kind: 'groupRotate'; members: GroupMember[]; box: Box; startMouse: Point; inverse: Affine }
   | { kind: 'marquee'; start: Point; current: Point; base: string[] }
   | { kind: 'vertex'; layerId: string; segments: PathSegment[]; indices: number[]; start: LayerProperties; startLocal: Point }
   // Bézier handle of a vertex; brokeMirror = Alt was held, so the handles stop mirroring
@@ -191,6 +204,9 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     setMirrorOverrides({});
   }, [vertexEditLayerId]);
 
+  // Boolean groups are drawn with a stand-in until paper.js arrives; then the canvas redraws
+  const booleanEngineReady = useBooleanEngine(hasBooleanLayers(project));
+
   // Render canvas whenever inputs change with full device pixel ratio
   const render = useCallback(() => {
     const canvas = canvasRef.current;
@@ -240,6 +256,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     selectedVertices,
     hoverHandle,
     drag,
+    booleanEngineReady,
   ]);
 
   useEffect(() => {
@@ -354,13 +371,23 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
 
   // ── Hit testing ──────────────────────────────────────────────────────────
 
-  const isEditable = (layer: Layer) =>
-    layer.visible && !layer.locked && currentTime >= layer.inTime && currentTime <= layer.outTime;
+  const layers = project.layers;
+
+  // Shown, and neither the layer nor a group around it is locked
+  const isEditable = (layer: Layer) => isLayerShown(layers, layer, currentTime) && !isLayerLocked(layers, layer);
+
+  // A layer is edited in the space it lives in: its boolean group's coordinates (the canvas at the
+  // top level). Points are taken there, and the zoom seen from there keeps handle sizes on screen.
+  const parentMatrix = (layer: Layer) => getParentWorldMatrix(layers, layer, currentTime);
+  const toParentSpace = (layer: Layer, pt: Point): Point => applyAffine(invertAffine(parentMatrix(layer)), pt.x, pt.y);
+  const toCanvas = (layer: Layer, pt: Point): Point => applyAffine(parentMatrix(layer), pt.x, pt.y);
+  const zoomFor = (layer: Layer) => zoom * affineScale(parentMatrix(layer));
+  const inOneSpace = (members: { layer: Layer }[]) => members.every((m) => m.layer.parentId === members[0].layer.parentId);
 
   // Selected layers that can be transformed right now, with their values at the current time
   const getSelectionMembers = (): GroupMember[] =>
     selectedLayerIds
-      .map((id) => project.layers.find((l) => l.id === id))
+      .map((id) => getLayer(layers, id))
       .filter((l): l is Layer => !!l && isEditable(l))
       .map((layer) => ({ id: layer.id, layer, start: getLayerPropertiesAtTime(layer, currentTime) }));
 
@@ -370,40 +397,46 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     | { kind: 'rotate'; cursor: string }
     | { kind: 'anchor'; cursor: string };
 
-  const hitTestSelection = (members: GroupMember[], pt: Point): SelectionHit | null => {
+  const hitTestSelection = (members: GroupMember[], canvasPt: Point): SelectionHit | null => {
     if (members.length === 1) {
       const { layer, start: p } = members[0];
-      const handle = hitTestHandle(getSelectionHandles(layer, p, zoom), pt.x, pt.y, zoom);
+      const pt = toParentSpace(layer, canvasPt);
+      const z = zoomFor(layer);
+      const handle = hitTestHandle(getSelectionHandles(layer, p, z), pt.x, pt.y, z);
       if (handle) return { kind: 'scale', handle, cursor: getHandleCursor(handle, p) };
-      if (hitTestRotation(getSelectionOutline(layer, p, zoom), pt.x, pt.y, zoom)) {
+      if (hitTestRotation(getSelectionOutline(layer, p, z), pt.x, pt.y, z)) {
         return { kind: 'rotate', cursor: ROTATE_CURSOR };
       }
       const ax = p.x + (p.anchorX || 0);
       const ay = p.y + (p.anchorY || 0);
-      if (Math.hypot(pt.x - ax, pt.y - ay) <= 12 / zoom) return { kind: 'anchor', cursor: 'crosshair' };
+      if (Math.hypot(pt.x - ax, pt.y - ay) <= 12 / z) return { kind: 'anchor', cursor: 'crosshair' };
       return null;
     }
-    if (members.length > 1) {
+    // Several layers only share handles when they live in the same space
+    if (members.length > 1 && inOneSpace(members)) {
+      const pt = toParentSpace(members[0].layer, canvasPt);
+      const z = zoomFor(members[0].layer);
       const box = getGroupBox(members.map((m) => ({ layer: m.layer, props: m.start })));
-      const handle = hitTestHandle(getGroupHandles(box, zoom), pt.x, pt.y, zoom);
+      const handle = hitTestHandle(getGroupHandles(box, z), pt.x, pt.y, z);
       if (handle) return { kind: 'scale', handle, cursor: getGroupHandleCursor(handle) };
-      if (hitTestRotation(getGroupOutline(box, zoom), pt.x, pt.y, zoom)) return { kind: 'rotate', cursor: ROTATE_CURSOR };
+      if (hitTestRotation(getGroupOutline(box, z), pt.x, pt.y, z)) return { kind: 'rotate', cursor: ROTATE_CURSOR };
     }
     return null;
   };
 
-  // Top-most layer under the point
-  const hitTestLayer = (pt: Point): Layer | null => {
-    for (let i = project.layers.length - 1; i >= 0; i--) {
-      const layer = project.layers[i];
-      if (!isEditable(layer)) continue;
+  // Top-most layer of one space (a group's children, or the top level when parentId is undefined)
+  const hitTestIn = (parentId: string | undefined, canvasPt: Point): Layer | null => {
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const layer = layers[i];
+      if (layer.parentId !== parentId || !isEditable(layer)) continue;
 
       const p = getLayerPropertiesAtTime(layer, currentTime);
       const bounds = getLayerLocalBounds(layer, p);
       // Transform mouse canvas coordinates into layer's local space (position, anchor, rotation, scale)
+      const pt = toParentSpace(layer, canvasPt);
       const { x: lx, y: ly } = worldToLayerLocal(p, pt.x, pt.y);
       const sx = p.scaleX !== undefined ? p.scaleX : 1;
-      const hitTolerance = 6 / (Math.abs(sx || 1) * zoom);
+      const hitTolerance = 6 / (Math.abs(sx || 1) * zoomFor(layer));
       if (
         lx >= bounds.minX - hitTolerance &&
         lx <= bounds.maxX + hitTolerance &&
@@ -416,11 +449,28 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     return null;
   };
 
+  // Top-most layer under the point. A boolean group is picked as a whole; once one of its
+  // children is selected, clicks pick among the children first and then the levels around them,
+  // so clicking elsewhere leaves the group (as in Figma).
+  const hitTestLayer = (pt: Point): Layer | null => {
+    let scope = getLayer(layers, getLayer(layers, selectedLayerId)?.parentId);
+    while (scope) {
+      const hit = hitTestIn(scope.id, pt);
+      if (hit) return hit;
+      scope = getLayer(layers, scope.parentId);
+    }
+    return hitTestIn(undefined, pt);
+  };
+
   // Layer being vertex-edited, if it can be edited right now
   const getVertexLayer = () => {
-    const layer = vertexEditLayerId ? project.layers.find((l) => l.id === vertexEditLayerId) : undefined;
+    const layer = getLayer(layers, vertexEditLayerId);
     return layer && layer.type === 'path' && isEditable(layer) ? layer : null;
   };
+
+  // Canvas position of a point in the edited layer's own coordinates
+  const vertexToCanvas = (layer: Layer, props: LayerProperties, x: number, y: number) =>
+    toCanvas(layer, layerLocalToWorld(props, x, y));
 
   // Vertex of the edited path under the point (segment index)
   const hitTestVertex = (pt: Point): { layer: Layer; props: LayerProperties; segment: number } | null => {
@@ -432,7 +482,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     let best: number | null = null;
     let bestDist = Infinity;
     for (const v of getPathVertices(parsePath(props.pathData))) {
-      const w = layerLocalToWorld(props, v.x, v.y);
+      const w = vertexToCanvas(layer, props, v.x, v.y);
       const d = Math.hypot(pt.x - w.x, pt.y - w.y);
       if (d <= radius && d < bestDist) {
         best = v.segment;
@@ -450,7 +500,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     if (!props.pathData) return [];
     return getPathVertices(parsePath(props.pathData))
       .filter((v) => {
-        const w = layerLocalToWorld(props, v.x, v.y);
+        const w = vertexToCanvas(layer, props, v.x, v.y);
         return w.x >= box.minX && w.x <= box.maxX && w.y >= box.minY && w.y <= box.maxY;
       })
       .map((v) => v.segment);
@@ -477,7 +527,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     for (const v of getPathVertices(segments)) {
       if (!isVertexSelected(segments, v.segment)) continue;
       for (const h of getVisibleHandles(segments, v.segment)) {
-        const w = layerLocalToWorld(props, h.x, h.y);
+        const w = vertexToCanvas(layer, props, h.x, h.y);
         const d = Math.hypot(pt.x - w.x, pt.y - w.y);
         if (d <= radius && (!best || d < best.dist)) best = { layer, props, vertex: v.segment, side: h.side, dist: d };
       }
@@ -580,8 +630,10 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
 
       const step = e.shiftKey ? 10 : 1;
       // Canvas offset expressed in the layer's own (rotated / scaled) coordinates
-      const origin = worldToLayerLocal(props, 0, 0);
-      const target = worldToLayerLocal(props, d[0] * step, d[1] * step);
+      const o = toParentSpace(layer, { x: 0, y: 0 });
+      const t = toParentSpace(layer, { x: d[0] * step, y: d[1] * step });
+      const origin = worldToLayerLocal(props, o.x, o.y);
+      const target = worldToLayerLocal(props, t.x, t.y);
       const segments = parsePath(props.pathData);
       const moved = moveVertices(
         segments,
@@ -622,7 +674,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
         const vertexPt = vertexHit
           ? getPathVertices(parsePath(vertexHit.props.pathData!)).find((v) => v.segment === vertexHit.segment)
           : null;
-        const vertexWorld = vertexPt ? layerLocalToWorld(vertexHit!.props, vertexPt.x, vertexPt.y) : null;
+        const vertexWorld = vertexPt ? vertexToCanvas(vertexHit!.layer, vertexHit!.props, vertexPt.x, vertexPt.y) : null;
         const vertexDist = vertexWorld ? Math.hypot(pt.x - vertexWorld.x, pt.y - vertexWorld.y) : Infinity;
         if (handleHit.dist < vertexDist) {
           const segments = parsePath(handleHit.props.pathData!);
@@ -653,13 +705,14 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
             : [vertexHit.segment];
         setSelectedVertices(selection);
         const segments = parsePath(vertexHit.props.pathData!);
+        const startPt = toParentSpace(vertexHit.layer, pt);
         setDrag({
           kind: 'vertex',
           layerId: vertexHit.layer.id,
           segments,
           indices: getMovedSegments(segments, selection),
           start: vertexHit.props,
-          startLocal: worldToLayerLocal(vertexHit.props, pt.x, pt.y),
+          startLocal: worldToLayerLocal(vertexHit.props, startPt.x, startPt.y),
         });
         return;
       }
@@ -674,18 +727,21 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
     const members = getSelectionMembers();
     const selectionHit = hitTestSelection(members, pt);
     if (selectionHit) {
+      // Everything is computed in the space the selection lives in
+      const inverse = invertAffine(parentMatrix(members[0].layer));
+      const spacePt = applyAffine(inverse, pt.x, pt.y);
       const box = members.length > 1 ? getGroupBox(members.map((m) => ({ layer: m.layer, props: m.start }))) : null;
       if (selectionHit.kind === 'scale') {
         setDrag(
           box
-            ? { kind: 'groupScale', members, box, handle: selectionHit.handle }
+            ? { kind: 'groupScale', members, box, handle: selectionHit.handle, inverse }
             : { kind: 'scale', layerId: members[0].id, handle: selectionHit.handle, start: members[0].start }
         );
       } else if (selectionHit.kind === 'rotate') {
         setDrag(
           box
-            ? { kind: 'groupRotate', members, box, startMouse: pt }
-            : { kind: 'rotate', layerId: members[0].id, start: members[0].start, startMouse: pt }
+            ? { kind: 'groupRotate', members, box, startMouse: spacePt, inverse }
+            : { kind: 'rotate', layerId: members[0].id, start: members[0].start, startMouse: spacePt }
         );
       } else {
         setDrag({ kind: 'anchor', layerId: members[0].id });
@@ -703,11 +759,11 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       const ids = isSelected ? selectedLayerIds : additive ? [...selectedLayerIds, hit.id] : [hit.id];
       onSelectLayers(ids, hit.id);
       const moving = ids
-        .map((id) => project.layers.find((l) => l.id === id))
+        .map((id) => getLayer(layers, id))
         .filter((l): l is Layer => !!l && isEditable(l))
         .map((l) => {
           const p = getLayerPropertiesAtTime(l, currentTime);
-          return { id: l.id, x: p.x, y: p.y };
+          return { id: l.id, x: p.x, y: p.y, inverse: invertAffine(parentMatrix(l)) };
         });
       setDrag({
         kind: 'move',
@@ -751,10 +807,13 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       }
 
       const pt = clientToCanvas(e.clientX, e.clientY);
+      // The mouse in the space of the dragged layer (its group's coordinates)
+      const draggedLayer = 'layerId' in d ? getLayer(project.layers, d.layerId) : undefined;
+      const spacePt = draggedLayer ? toParentSpace(draggedLayer, pt) : pt;
 
       switch (d.kind) {
         case 'vertex': {
-          const local = worldToLayerLocal(d.start, pt.x, pt.y);
+          const local = worldToLayerLocal(d.start, spacePt.x, spacePt.y);
           const moved = moveVertices(d.segments, d.indices, local.x - d.startLocal.x, local.y - d.startLocal.y);
           recordOnce();
           onUpdateLayerProperties(d.layerId, { pathData: serializePath(moved) }, false);
@@ -762,7 +821,7 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
         }
         case 'handle': {
           if (e.altKey) d.brokeMirror = true;
-          const local = worldToLayerLocal(d.start, pt.x, pt.y);
+          const local = worldToLayerLocal(d.start, spacePt.x, spacePt.y);
           const moved = moveHandle(d.segments, d.vertex, d.side, local.x, local.y, d.brokeMirror ? 'none' : d.mode);
           recordOnce();
           onUpdateLayerProperties(d.layerId, { pathData: serializePath(moved) }, false);
@@ -800,20 +859,22 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           }
           recordOnce();
           for (const m of d.members) {
-            onUpdateLayerProperties(m.id, { x: Math.round(m.x + dx), y: Math.round(m.y + dy) }, false);
+            // The canvas offset, seen from the layer's group
+            const from = applyAffine(m.inverse, d.startMouse.x, d.startMouse.y);
+            const to = applyAffine(m.inverse, d.startMouse.x + dx, d.startMouse.y + dy);
+            onUpdateLayerProperties(m.id, { x: Math.round(m.x + to.x - from.x), y: Math.round(m.y + to.y - from.y) }, false);
           }
           break;
         }
         case 'anchor': {
-          const layer = project.layers.find((l) => l.id === d.layerId);
-          if (!layer) break;
-          const p = getLayerPropertiesAtTime(layer, currentTime);
+          if (!draggedLayer) break;
+          const p = getLayerPropertiesAtTime(draggedLayer, currentTime);
           recordOnce();
-          onUpdateLayerProperties(d.layerId, { anchorX: Math.round(pt.x - p.x), anchorY: Math.round(pt.y - p.y) }, false);
+          onUpdateLayerProperties(d.layerId, { anchorX: Math.round(spacePt.x - p.x), anchorY: Math.round(spacePt.y - p.y) }, false);
           break;
         }
         case 'scale': {
-          const result = computeHandleScale(d.start, d.handle, pt.x, pt.y, { free: e.shiftKey, fromAnchor: e.altKey });
+          const result = computeHandleScale(d.start, d.handle, spacePt.x, spacePt.y, { free: e.shiftKey, fromAnchor: e.altKey });
           const changes: Partial<LayerProperties> = { scaleX: result.scaleX, scaleY: result.scaleY };
           // Only touch position when it actually compensates, so it isn't keyframed needlessly
           if (result.x !== d.start.x || result.y !== d.start.y) {
@@ -826,12 +887,13 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
         }
         case 'rotate': {
           recordOnce();
-          onUpdateLayerProperties(d.layerId, { rotation: computeRotation(d.start, d.startMouse, pt.x, pt.y, e.shiftKey) }, false);
+          onUpdateLayerProperties(d.layerId, { rotation: computeRotation(d.start, d.startMouse, spacePt.x, spacePt.y, e.shiftKey) }, false);
           break;
         }
         case 'groupScale': {
           recordOnce();
-          const updates = computeGroupScale(d.members, d.box, d.handle, pt.x, pt.y, {
+          const gp = applyAffine(d.inverse, pt.x, pt.y);
+          const updates = computeGroupScale(d.members, d.box, d.handle, gp.x, gp.y, {
             free: e.shiftKey,
             fromCenter: e.altKey,
           });
@@ -840,7 +902,8 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
         }
         case 'groupRotate': {
           recordOnce();
-          const updates = computeGroupRotation(d.members, d.box, d.startMouse, pt.x, pt.y, e.shiftKey);
+          const gp = applyAffine(d.inverse, pt.x, pt.y);
+          const updates = computeGroupRotation(d.members, d.box, d.startMouse, gp.x, gp.y, e.shiftKey);
           updates.forEach((u) => onUpdateLayerProperties(u.id, u.changes, false));
           break;
         }
@@ -851,8 +914,12 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
             maxX: Math.max(d.start.x, pt.x),
             maxY: Math.max(d.start.y, pt.y),
           };
+          // Top-level layers only: a boolean group is boxed as a whole
           const hits = project.layers
-            .filter((l) => isEditable(l) && boxesIntersect(rect, getWorldBox(l, getLayerPropertiesAtTime(l, currentTime))))
+            .filter(
+              (l) =>
+                !l.parentId && isEditable(l) && boxesIntersect(rect, getWorldBox(l, getLayerPropertiesAtTime(l, currentTime)))
+            )
             .map((l) => l.id);
           const ids = [...d.base, ...hits.filter((id) => !d.base.includes(id))];
           const key = ids.join('|');
@@ -959,7 +1026,8 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
       onMouseMove={handleMouseMove}
       onDoubleClick={(e) => {
         // Double click on a path (or the edited one) toggles vertex editing; on a vertex it
-        // turns it into a curve or back into a corner
+        // turns it into a curve or back into a corner; on a boolean group it selects the shape
+        // under the cursor inside it
         if (activeTool !== 'select' || e.button !== 0) return;
         const pt = clientToCanvas(e.clientX, e.clientY);
         if (hitTestBezierHandle(pt)) return;
@@ -971,6 +1039,11 @@ export const CanvasView: React.FC<CanvasViewProps> = ({
           return;
         }
         const hit = hitTestLayer(pt);
+        if (hit?.type === 'boolean') {
+          const child = hitTestIn(hit.id, pt);
+          if (child) onSelectLayers([child.id], child.id);
+          return;
+        }
         if (hit?.type === 'path') onToggleVertexEdit(hit.id);
       }}
       onContextMenu={(e) => {

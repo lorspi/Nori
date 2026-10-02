@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Cursor as MousePointer,
   Hand,
@@ -13,8 +13,13 @@ import {
   Checkerboard as Grid,
   ArrowUUpLeft as Undo2,
   ArrowUUpRight as Redo2,
+  Path as PathIcon,
+  SelectionSlash,
+  UniteSquare,
 } from '@phosphor-icons/react';
-import { Project } from '../types/animation';
+import { BooleanOperation, Project } from '../types/animation';
+import { BOOLEAN_LABELS, BOOLEAN_OPERATIONS } from '../utils/booleanGroups';
+import { BOOLEAN_ICONS } from './booleanIcons';
 import ThemeToggle from './ThemeToggle';
 import { Dropdown } from './Dropdown';
 
@@ -52,6 +57,11 @@ interface TopBarProps {
   onOpenFolder: (id: string) => void;
   onRenameProject: (title: string) => void;
   onAddLayer: (type: ShapeType) => void;
+  // Boolean operations on the selection: combine shapes or change the selected group's operation
+  booleanState: { canCombine: boolean; activeOp: BooleanOperation | null; canFlatten: boolean };
+  onBooleanOperation: (op: BooleanOperation) => void;
+  onFlattenBoolean: () => void;
+  onUngroupBoolean: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -73,8 +83,29 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenFolder,
   onRenameProject,
   onAddLayer,
+  booleanState,
+  onBooleanOperation,
+  onFlattenBoolean,
+  onUngroupBoolean,
 }) => {
   const [titleDraft, setTitleDraft] = useState(project.title);
+  const [showBooleanMenu, setShowBooleanMenu] = useState(false);
+  const booleanMenuRef = useRef<HTMLDivElement>(null);
+  const booleanEnabled = booleanState.canCombine || booleanState.canFlatten;
+  const ActiveBooleanIcon = booleanState.activeOp ? BOOLEAN_ICONS[booleanState.activeOp] : UniteSquare;
+
+  // The boolean menu closes on a click outside it or when nothing can be combined anymore
+  useEffect(() => {
+    if (!showBooleanMenu) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (!booleanMenuRef.current?.contains(e.target as Node)) setShowBooleanMenu(false);
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, [showBooleanMenu]);
+  useEffect(() => {
+    if (!booleanEnabled) setShowBooleanMenu(false);
+  }, [booleanEnabled]);
 
   // Keep the editable title in sync when another project is opened
   useEffect(() => setTitleDraft(project.title), [project.title]);
@@ -190,6 +221,88 @@ export const TopBar: React.FC<TopBarProps> = ({
               </div>
             )}
           </div>
+        </div>
+
+        {/* Boolean operations: combine the selected shapes, or change the selected group */}
+        <div ref={booleanMenuRef} className="relative">
+          <button
+            onClick={() => booleanEnabled && setShowBooleanMenu(!showBooleanMenu)}
+            disabled={!booleanEnabled}
+            data-tooltip={
+              booleanEnabled
+                ? 'Operaciones booleanas'
+                : 'Operaciones booleanas: selecciona dos o más formas (Shift + clic) o un grupo booleano'
+            }
+            className={`p-1.5 rounded-lg border flex items-center gap-0.5 transition-colors ${
+              showBooleanMenu
+                ? 'bg-bento-blue text-white border-bento-blue'
+                : booleanEnabled
+                  ? 'bg-secondary border-border text-muted-foreground hover:text-foreground hover:bg-accent'
+                  : 'bg-secondary border-border text-muted-foreground/50 opacity-50 cursor-not-allowed'
+            }`}
+          >
+            <ActiveBooleanIcon className="w-3.5 h-3.5" />
+            <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+          </button>
+
+          {showBooleanMenu && (
+            <div className="absolute left-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-card-hover py-1 w-64 z-50 text-foreground">
+              {BOOLEAN_OPERATIONS.map((op) => {
+                const Icon = BOOLEAN_ICONS[op];
+                const active = booleanState.activeOp === op;
+                return (
+                  <button
+                    key={op}
+                    disabled={!booleanState.canCombine}
+                    onClick={() => {
+                      onBooleanOperation(op);
+                      setShowBooleanMenu(false);
+                    }}
+                    className={`w-full px-3 py-1.5 flex items-center gap-2 text-left hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent ${
+                      active ? 'text-bento-blue' : ''
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0 text-bento-blue" weight={active ? 'fill' : 'regular'} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block font-medium">{BOOLEAN_LABELS[op].action}</span>
+                      <span className="block text-[10px] text-muted-foreground truncate">{BOOLEAN_LABELS[op].description}</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">{BOOLEAN_LABELS[op].shortcut}</span>
+                  </button>
+                );
+              })}
+              <div className="my-1 border-t border-border" />
+              <button
+                disabled={!booleanState.canFlatten}
+                onClick={() => {
+                  onFlattenBoolean();
+                  setShowBooleanMenu(false);
+                }}
+                className="w-full px-3 py-1.5 flex items-center gap-2 text-left hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <PathIcon className="w-4 h-4 shrink-0 text-bento-blue" />
+                <span className="flex-1 min-w-0">
+                  <span className="block font-medium">Aplanar</span>
+                  <span className="block text-[10px] text-muted-foreground truncate">Convierte el grupo en un trazado editable</span>
+                </span>
+                <span className="text-[10px] font-mono text-muted-foreground shrink-0">Ctrl+E</span>
+              </button>
+              <button
+                disabled={!booleanState.canFlatten}
+                onClick={() => {
+                  onUngroupBoolean();
+                  setShowBooleanMenu(false);
+                }}
+                className="w-full px-3 py-1.5 flex items-center gap-2 text-left hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <SelectionSlash className="w-4 h-4 shrink-0 text-bento-blue" />
+                <span className="flex-1 min-w-0">
+                  <span className="block font-medium">Desagrupar</span>
+                  <span className="block text-[10px] text-muted-foreground truncate">Saca las formas del grupo y lo elimina</span>
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

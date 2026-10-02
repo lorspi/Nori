@@ -69,6 +69,7 @@ export default function AboutNori() {
     'Canvas 2D',
     'gifenc',
     'fflate',
+    'paper.js',
   ];
 
   const tabs = [

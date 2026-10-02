@@ -10,6 +10,16 @@ import {
   layerLocalToWorld,
 } from './transformHandles';
 import { getLinkedSegments, getPathVertices, getShapePathData, getVisibleHandles, parsePath } from './pathGeometry';
+import { getLastBooleanResult, resolveBooleanGroup } from './booleanOps';
+import {
+  affineScale,
+  getLayer,
+  getLayerWorldMatrix,
+  getParentWorldMatrix,
+  isBooleanLayer,
+  isLayerShown,
+  multiplyAffine,
+} from './layerTree';
 
 export interface RenderOptions {
   scale?: number;
@@ -91,6 +101,9 @@ function getLayerPath(layer: Layer, p: LayerProperties): { path: Path2D; fillRul
     }
     case 'path':
       return p.pathData ? { path: getCachedPath2D(p.pathData), fillRule: 'evenodd' } : null;
+    case 'boolean':
+      // pathData holds the group's result (set by renderLayer)
+      return p.pathData ? { path: getCachedPath2D(p.pathData), fillRule: 'nonzero' } : null;
     default:
       return null;
   }
@@ -298,18 +311,104 @@ function renderLayerWithShadows(
   ctx.restore();
 }
 
+// Scratch canvases for the boolean fallback (one per nesting level, after the shadow ones)
+const SILHOUETTE_SCRATCH = 4;
+
+const COMPOSITE_FOR: Record<NonNullable<Layer['booleanOp']>, GlobalCompositeOperation> = {
+  union: 'source-over',
+  subtract: 'destination-out',
+  intersect: 'destination-in',
+  exclude: 'xor',
+};
+
 /**
- * Renders a single layer to canvas context at time t
+ * Silhouette of a boolean group without its geometric result: each child is filled in black and
+ * combined with the canvas composite operation of the group's operation. m is the device matrix of
+ * the group's coordinates; the target is a device-sized scratch canvas.
+ */
+function drawBooleanSilhouette(
+  target: CanvasRenderingContext2D,
+  layers: Layer[],
+  group: Layer,
+  time: number,
+  m: DOMMatrix,
+  depth: number
+) {
+  const mode = COMPOSITE_FOR[group.booleanOp ?? 'union'];
+  const { operands } = resolveBooleanGroup(layers, group, time);
+  const W = target.canvas.width;
+  const H = target.canvas.height;
+  operands.forEach((o, i) => {
+    const op = i === 0 ? 'source-over' : mode;
+    const om = m.multiply(new DOMMatrix(o.matrix));
+    target.save();
+    if (o.d === null) {
+      // Nested group whose result isn't ready either
+      const nested = getScratch(SILHOUETTE_SCRATCH + depth + 1, W, H);
+      drawBooleanSilhouette(nested, layers, o.layer, time, om, depth + 1);
+      target.setTransform(1, 0, 0, 1, 0, 0);
+      target.globalCompositeOperation = op;
+      target.drawImage(nested.canvas, 0, 0);
+    } else if (o.d) {
+      target.setTransform(om);
+      target.globalCompositeOperation = op;
+      target.fillStyle = '#000000';
+      target.fill(getCachedPath2D(o.d), o.fillRule);
+    } else if (op === 'destination-in') {
+      // Intersecting with an empty shape leaves nothing
+      target.setTransform(1, 0, 0, 1, 0, 0);
+      target.clearRect(0, 0, W, H);
+    }
+    target.restore();
+  });
+}
+
+/** Boolean group drawn from its children's silhouettes, painted with the group's fill */
+function renderBooleanFallback(
+  ctx: CanvasRenderingContext2D,
+  layers: Layer[],
+  group: Layer,
+  p: LayerProperties,
+  time: number,
+  opacity: number,
+  blur: number
+) {
+  if (!p.fill || p.fill === 'transparent' || opacity <= 0) return;
+  const m = ctx.getTransform();
+  const W = ctx.canvas.width;
+  const H = ctx.canvas.height;
+  const sil = getScratch(SILHOUETTE_SCRATCH, W, H);
+  drawBooleanSilhouette(sil, layers, group, time, m, 0);
+  sil.setTransform(1, 0, 0, 1, 0, 0);
+  sil.globalCompositeOperation = 'source-in';
+  sil.globalAlpha = clamp01(p.fillOpacity);
+  sil.fillStyle = p.fill;
+  sil.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = opacity;
+  if (blur > 0) ctx.filter = `blur(${(blur * Math.sqrt(Math.abs(m.a * m.d - m.b * m.c))).toFixed(2)}px)`;
+  ctx.drawImage(sil.canvas, 0, 0);
+  ctx.restore();
+}
+
+/**
+ * Renders a single layer to canvas context at time t. layers is the whole project (needed by
+ * boolean groups, which are drawn from their children).
  */
 export function renderLayer(
   ctx: CanvasRenderingContext2D,
   layer: Layer,
-  currentTime: number
+  currentTime: number,
+  layers: Layer[] = [layer]
 ) {
   if (!layer.visible) return;
   if (currentTime < layer.inTime || currentTime > layer.outTime) return;
 
-  const p = getLayerPropertiesAtTime(layer, currentTime);
+  let p = getLayerPropertiesAtTime(layer, currentTime);
+  const boolean = isBooleanLayer(layer) ? resolveBooleanGroup(layers, layer, currentTime) : null;
+  if (boolean?.d) p = { ...p, pathData: boolean.d };
 
   ctx.save();
 
@@ -334,6 +433,12 @@ export function renderLayer(
   const opacity = clamp01(p.opacity);
   // Gaussian blur, measured in layer units like in the SVG export (scales with the layer and zoom)
   const blur = Math.max(0, Number(p.blur) || 0);
+
+  if (boolean && boolean.d === null) {
+    renderBooleanFallback(ctx, layers, layer, p, currentTime, opacity, blur);
+    ctx.restore();
+    return;
+  }
 
   const drop = activeShadow(p.dropShadow);
   const inner = layer.type === 'text' ? null : activeShadow(p.innerShadow);
@@ -381,39 +486,104 @@ export function renderProjectFrame(
     ctx.fillRect(0, 0, project.width, project.height);
   }
 
-  // Render layers in forward order (back to front)
+  // Render layers in forward order (back to front); children are drawn by their boolean group
   for (const layer of project.layers) {
-    renderLayer(ctx, layer, currentTime);
+    if (!layer.parentId) renderLayer(ctx, layer, currentTime, project.layers);
   }
 
-  const isShown = (l: Layer) => l.visible && currentTime >= l.inTime && currentTime <= l.outTime;
+  const layers = project.layers;
+  const isShown = (l: Layer) => isLayerShown(layers, l, currentTime);
+  const zoom = options.zoom || 1;
+
+  // Selection visuals of a layer are drawn in the space it lives in (its group's coordinates),
+  // with the zoom corrected so they keep their size on screen
+  const inParentSpace = (layer: Layer, draw: (zoom: number) => void) => {
+    const m = getParentWorldMatrix(layers, layer, currentTime);
+    ctx.save();
+    ctx.transform(...m);
+    draw(zoom * affineScale(m));
+    ctx.restore();
+  };
 
   // Draw selection bounding box if in editor mode
   const multi = (options.selectedLayerIds ?? [])
-    .map((id) => project.layers.find((l) => l.id === id))
+    .map((id) => getLayer(layers, id))
     .filter((l): l is Layer => !!l && isShown(l));
-  const vertexLayer = options.vertexEditLayerId
-    ? project.layers.find((l) => l.id === options.vertexEditLayerId)
-    : undefined;
-  if (vertexLayer && isShown(vertexLayer)) {
-    drawVertexEditor(
-      ctx,
-      vertexLayer,
-      currentTime,
-      options.zoom || 1,
-      options.selectedVertices ?? [],
-      options.hoverVertex ?? null,
-      options.hoverHandle ?? null
-    );
-  } else if (multi.length > 1) {
-    drawGroupSelection(ctx, multi, currentTime, options.zoom || 1);
-  } else if (options.selectedLayerId) {
-    const selectedLayer = project.layers.find((l) => l.id === options.selectedLayerId);
-    if (selectedLayer && selectedLayer.visible && currentTime >= selectedLayer.inTime && currentTime <= selectedLayer.outTime) {
-      drawSelectionBounds(ctx, selectedLayer, currentTime, options.zoom || 1);
-    }
+  const vertexLayer = getLayer(layers, options.vertexEditLayerId);
+  const selectedLayer = getLayer(layers, options.selectedLayerId);
+
+  // The shapes that make the selected boolean group (or the siblings of a selected child)
+  const outlineGroup = isBooleanLayer(selectedLayer) ? selectedLayer : getLayer(layers, selectedLayer?.parentId);
+  if (outlineGroup && multi.length <= 1 && isShown(outlineGroup)) {
+    drawBooleanOperandOutlines(ctx, layers, outlineGroup, currentTime, zoom, selectedLayer?.id ?? null);
   }
 
+  if (vertexLayer && isShown(vertexLayer)) {
+    inParentSpace(vertexLayer, (z) =>
+      drawVertexEditor(
+        ctx,
+        vertexLayer,
+        currentTime,
+        z,
+        options.selectedVertices ?? [],
+        options.hoverVertex ?? null,
+        options.hoverHandle ?? null
+      )
+    );
+  } else if (multi.length > 1) {
+    // Layers of one space share a box with handles; across groups each one is only outlined
+    if (multi.every((l) => l.parentId === multi[0].parentId)) {
+      inParentSpace(multi[0], (z) => drawGroupSelection(ctx, multi, currentTime, z));
+    } else {
+      for (const layer of multi) inParentSpace(layer, (z) => drawLayerOutline(ctx, layer, currentTime, z));
+    }
+  } else if (selectedLayer && isShown(selectedLayer)) {
+    inParentSpace(selectedLayer, (z) => drawSelectionBounds(ctx, selectedLayer, currentTime, z));
+  }
+
+  ctx.restore();
+}
+
+// Thin outline of a layer's bounds (multi-selection across groups)
+function drawLayerOutline(ctx: CanvasRenderingContext2D, layer: Layer, currentTime: number, zoom: number) {
+  const corners = getLayerWorldCorners(layer, getLayerPropertiesAtTime(layer, currentTime));
+  ctx.save();
+  ctx.strokeStyle = '#0084ff';
+  ctx.lineWidth = 1 / Math.max(0.001, zoom);
+  ctx.beginPath();
+  corners.forEach((c, i) => (i === 0 ? ctx.moveTo(c.x, c.y) : ctx.lineTo(c.x, c.y)));
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Outlines of the shapes inside a boolean group, so they can be found while the group is
+ * selected (as in Figma). The selected child, if any, is drawn stronger.
+ */
+function drawBooleanOperandOutlines(
+  ctx: CanvasRenderingContext2D,
+  layers: Layer[],
+  group: Layer,
+  currentTime: number,
+  zoom: number,
+  selectedId: string | null
+) {
+  const groupMatrix = getLayerWorldMatrix(layers, group, currentTime);
+  const { operands } = resolveBooleanGroup(layers, group, currentTime);
+  ctx.save();
+  for (const o of operands) {
+    if (!o.d) continue;
+    const m = multiplyAffine(groupMatrix, o.matrix);
+    const selected = o.layer.id === selectedId;
+    ctx.save();
+    ctx.transform(...m);
+    ctx.strokeStyle = selected ? '#0084ff' : 'rgba(0, 132, 255, 0.7)';
+    // Constant width on screen, whatever the scale of the group and the shape
+    ctx.lineWidth = (selected ? 1.5 : 1) / Math.max(0.001, affineScale(m) * zoom);
+    ctx.stroke(getCachedPath2D(o.d));
+    ctx.restore();
+  }
   ctx.restore();
 }
 
@@ -601,6 +771,12 @@ export function getPathBounds(pathData: string): BoundingBox {
 export function getLayerLocalBounds(layer: Layer, p: any): BoundingBox {
   if (layer.type === 'path' && p.pathData) {
     return getPathBounds(p.pathData);
+  }
+  // Boolean groups: bounds of the last result drawn (or of their shapes while there is none)
+  if (layer.type === 'boolean') {
+    if (p.pathData) return getPathBounds(p.pathData);
+    const last = getLastBooleanResult(layer.id);
+    if (last) return last.bounds;
   }
   const halfW = (p.width || 60) / 2;
   const halfH = (p.height || 60) / 2;

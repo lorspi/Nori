@@ -4,6 +4,7 @@ import {
   Layer,
   LayerType,
   AnimatableProperty,
+  BooleanOperation,
   EasingConfig,
   PropertyTrack,
   KeyframeRef,
@@ -48,11 +49,45 @@ import {
   sortKeyframes,
 } from './utils/animationTracks';
 import { useUI, ToastType } from './lib/ui';
+import { loadBooleanEngine } from './utils/booleanOps';
+import {
+  BOOLEAN_LABELS,
+  cloneLayerTree,
+  createBooleanGroup,
+  deleteLayerTrees,
+  flattenBooleanGroup,
+  getBooleanCandidates,
+  getLayersForClipboard,
+  LayerDropPosition,
+  moveLayer,
+  setBooleanOperation,
+  ungroupBooleanGroup,
+} from './utils/booleanGroups';
+import {
+  applyAffine,
+  getLayer,
+  getParentWorldMatrix,
+  invertAffine,
+  isLayerLocked,
+  isLayerShown,
+  fitLayersToDuration,
+  normalizeLayerTree,
+  repairLayerEnds,
+  topLevelIds,
+} from './utils/layerTree';
 
 // Longest Space press that still counts as a tap (toggles playback); longer presses pan the canvas
 const SPACE_TAP_MAX_MS = 400;
 // Input types where Space types nothing, so it can still toggle playback
 const NON_TEXT_INPUT_TYPES = new Set(['number', 'range', 'color']);
+
+// Alt + Shift + key -> boolean operation (as in Figma)
+const BOOLEAN_SHORTCUTS: Record<string, BooleanOperation> = {
+  KeyU: 'union',
+  KeyS: 'subtract',
+  KeyI: 'intersect',
+  KeyX: 'exclude',
+};
 
 // Arrow key -> canvas direction
 const ARROW_DIRECTIONS: Record<string, [number, number]> = {
@@ -74,7 +109,11 @@ interface EditorProps {
 }
 
 export default function Editor({ initialProject, autoplay = false, onGoHome, folder, onOpenFolder }: EditorProps) {
-  const [project, setProject] = useState<Project>(initialProject);
+  // Projects saved by earlier versions may have layers cut at an older, shorter duration
+  const [project, setProject] = useState<Project>(() => ({
+    ...initialProject,
+    layers: repairLayerEnds(initialProject.layers, initialProject.duration),
+  }));
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(autoplay);
   const [activeTool, setActiveTool] = useState<ToolMode>('select');
@@ -287,6 +326,18 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
         return;
       }
 
+      // Boolean operations: Alt + Shift + U / S / I / X (as in Figma); Ctrl + E flattens the group
+      if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && BOOLEAN_SHORTCUTS[e.code]) {
+        e.preventDefault();
+        if (!e.repeat) handleBooleanOperation(BOOLEAN_SHORTCUTS[e.code]);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.code === 'KeyE') {
+        e.preventDefault();
+        if (!e.repeat) handleFlattenBoolean();
+        return;
+      }
+
       // Copy keyframes (after clicking the timeline, or with no layer selected) or layers
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         const copyKeyframes =
@@ -372,6 +423,14 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
         // Leaving vertex editing keeps the layer selected
         if (vertexEditLayerId) {
           setVertexEditLayerId(null);
+          return;
+        }
+        // Inside a boolean group, Escape selects the group (as in Figma)
+        const selected = selectedLayerIds.map((id) => getLayer(project.layers, id));
+        const parentId = selected[0]?.parentId;
+        if (e.code === 'Escape' && parentId && selected.every((l) => l?.parentId === parentId)) {
+          setSelectedLayerId(parentId);
+          setSelectedKeyframes([]);
           return;
         }
         setSelectedLayerId(null);
@@ -508,14 +567,31 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     handleUpdateLayerProperties(layerId, { [property]: value }, recordUndo);
   }, [handleUpdateLayerProperties]);
 
+  // A canvas offset seen from the space a layer lives in (its boolean group's coordinates)
+  const toLayerSpaceOffset = (layer: Layer, dx: number, dy: number) => {
+    const inverse = invertAffine(getParentWorldMatrix(projectRef.current.layers, layer, currentTime));
+    const origin = applyAffine(inverse, 0, 0);
+    const moved = applyAffine(inverse, dx, dy);
+    return { dx: moved.x - origin.x, dy: moved.y - origin.y };
+  };
+
+  // Shown on the canvas and not locked (by itself or by a group around it)
+  const isMovable = (layer: Layer) =>
+    isLayerShown(projectRef.current.layers, layer, currentTime) && !isLayerLocked(projectRef.current.layers, layer);
+
   // Move layers on the canvas by an offset (arrow keys). Locked and hidden layers stay put.
   const handleNudgeLayers = (layerIds: string[], dx: number, dy: number, recordUndo: boolean) => {
-    const movable = projectRef.current.layers.filter((l) => layerIds.includes(l.id) && l.visible && !l.locked);
+    const movable = projectRef.current.layers.filter((l) => layerIds.includes(l.id) && isMovable(l));
     if (movable.length === 0) return;
     if (recordUndo) recordHistory(projectRef.current);
     for (const layer of movable) {
       const current = getLayerPropertiesAtTime(layer, currentTime);
-      handleUpdateLayerProperties(layer.id, { x: current.x + dx, y: current.y + dy }, false);
+      const offset = toLayerSpaceOffset(layer, dx, dy);
+      handleUpdateLayerProperties(
+        layer.id,
+        { x: Number((current.x + offset.dx).toFixed(2)), y: Number((current.y + offset.dy).toFixed(2)) },
+        false
+      );
     }
   };
 
@@ -525,18 +601,23 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     const current = projectRef.current;
     const ids = selectedLayerIds.length > 0 ? selectedLayerIds : selectedLayerId ? [selectedLayerId] : [];
     const members = current.layers
-      .filter((l) => ids.includes(l.id) && l.visible && !l.locked)
-      .map((layer) => ({ layer, props: getLayerPropertiesAtTime(layer, currentTime) }));
+      .filter((l) => ids.includes(l.id) && isMovable(l))
+      .map((layer) => ({
+        layer,
+        props: getLayerPropertiesAtTime(layer, currentTime),
+        matrix: layer.parentId ? getParentWorldMatrix(current.layers, layer, currentTime) : undefined,
+      }));
     const moves = computeAlignMoves(members, mode, current).filter(
       (m) => Math.abs(m.dx) > 1e-3 || Math.abs(m.dy) > 1e-3
     );
     if (moves.length === 0) return;
     recordHistory(current);
     for (const move of moves) {
-      const props = members.find((m) => m.layer.id === move.layerId)!.props;
+      const member = members.find((m) => m.layer.id === move.layerId)!;
+      const offset = toLayerSpaceOffset(member.layer, move.dx, move.dy);
       const changes: Partial<Layer['properties']> = {};
-      if (move.dx) changes.x = Number((props.x + move.dx).toFixed(2));
-      if (move.dy) changes.y = Number((props.y + move.dy).toFixed(2));
+      if (Math.abs(offset.dx) > 1e-3) changes.x = Number((member.props.x + offset.dx).toFixed(2));
+      if (Math.abs(offset.dy) > 1e-3) changes.y = Number((member.props.y + offset.dy).toFixed(2));
       handleUpdateLayerProperties(move.layerId, changes, false);
     }
   };
@@ -959,19 +1040,20 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
   // Copy layers (keeping their stacking order) to the in-app and the system clipboard
   const handleCopyLayers = (layerIds: string[], silent = false) => {
     const current = projectRef.current;
-    const layers = current.layers.filter((l) => layerIds.includes(l.id));
-    if (layers.length === 0) return;
-    const data = createLayersClipboard(layers, currentTime, current.duration);
+    // Boolean groups take their shapes along; shapes taken out of a group keep their canvas place
+    const tops = topLevelIds(current.layers, layerIds).map((id) => getLayer(current.layers, id)!);
+    if (tops.length === 0) return;
+    const data = createLayersClipboard(getLayersForClipboard(current.layers, layerIds, currentTime), currentTime, current.duration);
     setLayerClipboard(data);
     lastCopiedRef.current = 'layers';
     writeClipboardText(serializeClipboard(data)).then((ok) => {
       clipboardWriteFailedRef.current = !ok;
     });
-    if (!silent) showToast(layers.length === 1 ? `Capa "${layers[0].name}" copiada` : `${layers.length} capas copiadas`, 'success');
+    if (!silent) showToast(tops.length === 1 ? `Capa "${tops[0].name}" copiada` : `${tops.length} capas copiadas`, 'success');
   };
 
   const handleCutLayers = (layerIds: string[]) => {
-    const count = projectRef.current.layers.filter((l) => layerIds.includes(l.id)).length;
+    const count = topLevelIds(projectRef.current.layers, layerIds).length;
     if (count === 0) return;
     handleCopyLayers(layerIds, true);
     handleDeleteLayers(layerIds, true);
@@ -987,10 +1069,12 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     const at = indices.length > 0 ? Math.max(...indices) + 1 : current.layers.length;
     const layers = [...current.layers];
     layers.splice(at, 0, ...newLayers);
-    setProject({ ...current, layers });
+    // Pasted at the top level: inside a group's block they move after the group
+    setProject({ ...current, layers: normalizeLayerTree(layers) });
+    const roots = newLayers.filter((l) => !l.parentId);
     handleSelectLayers(
-      newLayers.map((l) => l.id),
-      newLayers[newLayers.length - 1].id
+      roots.map((l) => l.id),
+      roots[roots.length - 1]?.id ?? null
     );
     setSelectedKeyframes([]);
     setActiveTool('select');
@@ -999,7 +1083,8 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
 
   const pasteLayersClipboard = (data: LayersClipboard, withAnimation: boolean) => {
     const layers = instantiateClipboardLayers(data, projectRef.current, withAnimation);
-    const what = layers.length === 1 ? `Capa "${layers[0].name}" pegada` : `${layers.length} capas pegadas`;
+    const roots = layers.filter((l) => !l.parentId);
+    const what = roots.length === 1 ? `Capa "${roots[0].name}" pegada` : `${roots.length} capas pegadas`;
     insertLayers(layers, withAnimation ? what : `${what} sin animación`);
   };
 
@@ -1132,6 +1217,22 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
         disabled: !hasSelection,
         onSelect: () => setPresetTargetIds(selectedLayerIds),
       },
+      ...(booleanState.canCombine
+        ? ([
+            'separator',
+            ...(['union', 'subtract', 'intersect', 'exclude'] as BooleanOperation[]).map((op) => ({
+              label: booleanState.activeOp === op ? `${BOOLEAN_LABELS[op].action} ✓` : BOOLEAN_LABELS[op].action,
+              shortcut: BOOLEAN_LABELS[op].shortcut,
+              onSelect: () => handleBooleanOperation(op),
+            })),
+          ] as ContextMenuItem[])
+        : []),
+      ...(booleanState.canFlatten
+        ? ([
+            { label: 'Aplanar en un trazado', shortcut: 'Ctrl+E', onSelect: () => handleFlattenBoolean() },
+            { label: 'Desagrupar', onSelect: () => handleUngroupBoolean() },
+          ] as ContextMenuItem[])
+        : []),
       'separator',
       {
         label: selectedLayerIds.length > 1 ? `Eliminar ${selectedLayerIds.length} capas` : 'Eliminar',
@@ -1304,19 +1405,18 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     setVertexEditLayerId((prev) => (prev === layerId ? null : layerId));
   };
 
-  // Duplicate Layer
+  // Duplicate Layer (a boolean group is copied with its shapes; the copy goes on top of its space)
   const handleDuplicateLayer = (layerId: string) => {
-    recordHistory(project);
-
     const layer = project.layers.find((l) => l.id === layerId);
     if (!layer) return;
+    recordHistory(project);
 
-    const newLayer: Layer = {
-      ...JSON.parse(JSON.stringify(layer)),
-      id: `layer_${Date.now()}`,
+    const [root, ...inside] = cloneLayerTree(project.layers, layerId);
+    const copy: Layer = {
+      ...root,
       name: `${layer.name} Copia`,
       properties: {
-        ...layer.properties,
+        ...root.properties,
         x: layer.properties.x + 20,
         y: layer.properties.y + 20,
       },
@@ -1324,48 +1424,141 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
 
     setProject((prev) => ({
       ...prev,
-      layers: [...prev.layers, newLayer],
+      layers: normalizeLayerTree([...prev.layers, copy, ...inside]),
     }));
-    setSelectedLayerId(newLayer.id);
+    setSelectedLayerId(copy.id);
   };
 
   // Alt + drag on the canvas: each layer gets a copy right above it, and the copies become the
   // selection that the drag moves. The canvas records the undo step before calling this.
   const handleDuplicateLayersForDrag = (layerIds: string[], primaryId: string): Record<string, string> => {
-    const stamp = Date.now();
+    const current = projectRef.current.layers;
+    const tops = topLevelIds(current, layerIds);
     const copies: Record<string, string> = {};
     const layers: Layer[] = [];
-    projectRef.current.layers.forEach((layer, index) => {
+    current.forEach((layer) => {
       layers.push(layer);
-      if (!layerIds.includes(layer.id)) return;
-      const copy: Layer = {
-        ...JSON.parse(JSON.stringify(layer)),
-        id: `layer_${stamp}_${index}`,
-        name: `${layer.name} Copia`,
-      };
-      copies[layer.id] = copy.id;
-      layers.push(copy);
+      if (!tops.includes(layer.id)) return;
+      const [root, ...inside] = cloneLayerTree(current, layer.id);
+      copies[layer.id] = root.id;
+      layers.push({ ...root, name: `${layer.name} Copia` }, ...inside);
     });
-    setProject((prev) => ({ ...prev, layers }));
+    setProject((prev) => ({ ...prev, layers: normalizeLayerTree(layers) }));
     const ids = Object.values(copies);
     handleSelectLayers(ids, copies[primaryId] ?? ids[ids.length - 1] ?? null);
     setSelectedKeyframes([]);
     return copies;
   };
 
-  // Delete Layer
+  // Delete Layer (with everything inside it; a boolean group left without shapes goes too)
   const handleDeleteLayers =(layerIds: string[], silent = false) => {
     if (layerIds.length === 0) return;
     recordHistory(project);
 
-    setProject((prev) => ({
-      ...prev,
-      layers: prev.layers.filter((l) => !layerIds.includes(l.id)),
-    }));
-    const remaining = selectedLayerIds.filter((id) => !layerIds.includes(id));
+    const { layers, removed } = deleteLayerTrees(project.layers, layerIds);
+    const count = topLevelIds(project.layers, layerIds).length;
+    setProject((prev) => ({ ...prev, layers }));
+    const remaining = selectedLayerIds.filter((id) => !removed.has(id));
     handleSelectLayers(remaining, remaining.includes(selectedLayerId ?? '') ? selectedLayerId : (remaining[0] ?? null));
-    setSelectedKeyframes((prev) => prev.filter((r) => !layerIds.includes(r.layerId)));
-    if (layerIds.length > 1 && !silent) showToast(`${layerIds.length} capas eliminadas`, 'success');
+    setSelectedKeyframes((prev) => prev.filter((r) => !removed.has(r.layerId)));
+    if (count > 1 && !silent) showToast(`${count} capas eliminadas`, 'success');
+  };
+
+  // ── Boolean groups ──────────────────────────────────────────────────────────
+
+  // With a boolean group selected, its operation changes; with several shapes, they are combined
+  const handleBooleanOperation = (op: BooleanOperation) => {
+    const current = projectRef.current;
+    const selected = getLayer(current.layers, selectedLayerId);
+    if (selected?.type === 'boolean' && selectedLayerIds.length <= 1) {
+      if (selected.booleanOp === op) return;
+      recordHistory(current);
+      setProject({ ...current, layers: setBooleanOperation(current.layers, selected.id, op) });
+      showToast(`Operación cambiada a ${BOOLEAN_LABELS[op].name}`, 'success');
+      return;
+    }
+    const result = createBooleanGroup(current.layers, selectedLayerIds, op, currentTime);
+    if ('error' in result) {
+      showToast(result.error, 'info');
+      return;
+    }
+    recordHistory(current);
+    setProject({ ...current, layers: result.layers });
+    setSelectedLayerId(result.selectId);
+    setSelectedKeyframes([]);
+    setVertexEditLayerId(null);
+    loadBooleanEngine();
+  };
+
+  // Ctrl + E: the selected boolean group becomes one path (its shape at the current frame)
+  const handleFlattenBoolean = async (layerId: string | null = selectedLayerId) => {
+    const target = getLayer(projectRef.current.layers, layerId);
+    if (target?.type !== 'boolean') {
+      showToast('Selecciona un grupo booleano para aplanarlo', 'info');
+      return;
+    }
+    if (!(await loadBooleanEngine())) {
+      showToast('No se pudo cargar el motor de operaciones booleanas. Revisa la conexión e inténtalo de nuevo.', 'error');
+      return;
+    }
+    const current = projectRef.current;
+    const result = flattenBooleanGroup(current.layers, target.id, currentTime);
+    if ('error' in result) {
+      showToast(result.error, 'warning');
+      return;
+    }
+    recordHistory(current);
+    setProject({ ...current, layers: result.layers });
+    setSelectedLayerId(result.selectId);
+    setSelectedKeyframes((prev) => prev.filter((r) => result.layers.some((l) => l.id === r.layerId)));
+    showToast(`"${target.name}" aplanado en un trazado`, 'success');
+  };
+
+  // Takes the shapes out of the group, where they are on the canvas
+  const handleUngroupBoolean = (layerId: string | null = selectedLayerId) => {
+    const current = projectRef.current;
+    const target = getLayer(current.layers, layerId);
+    if (target?.type !== 'boolean') return;
+    const result = ungroupBooleanGroup(current.layers, target.id, currentTime);
+    if ('error' in result) {
+      showToast(result.error, 'info');
+      return;
+    }
+    recordHistory(current);
+    setProject({ ...current, layers: result.layers });
+    handleSelectLayers(result.selectIds, result.selectIds[result.selectIds.length - 1] ?? null);
+    setSelectedKeyframes((prev) => prev.filter((r) => r.layerId !== target.id));
+    showToast(
+      result.lostAnimation
+        ? `Grupo desagrupado. Las formas quedan como se ven ahora: la animación de posición, escala o rotación del grupo no se conserva`
+        : 'Grupo desagrupado',
+      result.lostAnimation ? 'warning' : 'success'
+    );
+  };
+
+  // Timeline: a layer dragged to another place in the stacking order (or into / out of a group)
+  const handleMoveLayer = (layerId: string, refId: string, position: LayerDropPosition) => {
+    const current = projectRef.current;
+    const result = moveLayer(current.layers, layerId, refId, position, currentTime);
+    if (!result) return;
+    if ('error' in result) {
+      showToast(result.error, 'info');
+      return;
+    }
+    recordHistory(current);
+    setProject({ ...current, layers: result.layers });
+    const kept = selectedLayerIds.filter((id) => result.layers.some((l) => l.id === id));
+    handleSelectLayers(kept.length > 0 ? kept : [layerId], kept.includes(selectedLayerId ?? '') ? selectedLayerId : layerId);
+  };
+
+  // What the boolean controls (top bar, menus) can do with the current selection
+  const selectedForBoolean = getLayer(project.layers, selectedLayerId);
+  const booleanState = {
+    canCombine:
+      (selectedForBoolean?.type === 'boolean' && selectedLayerIds.length <= 1) ||
+      getBooleanCandidates(project.layers, selectedLayerIds).length >= 2,
+    activeOp: selectedForBoolean?.type === 'boolean' && selectedLayerIds.length <= 1 ? (selectedForBoolean.booleanOp ?? 'union') : null,
+    canFlatten: selectedForBoolean?.type === 'boolean',
   };
   const handleDeleteLayer = (layerId: string) => handleDeleteLayers([layerId]);
 
@@ -1410,6 +1603,10 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
           showToast(`Proyecto renombrado a "${title}"`, 'success');
         }}
         onAddLayer={handleAddLayer}
+        booleanState={booleanState}
+        onBooleanOperation={handleBooleanOperation}
+        onFlattenBoolean={() => handleFlattenBoolean()}
+        onUngroupBoolean={() => handleUngroupBoolean()}
       />
 
       {/* 2. Middle Workspace: Canvas + Inspector */}
@@ -1449,11 +1646,23 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
           onRetimeLayerAnimation={handleRetimeLayerAnimation}
           onUpdateProjectSettings={(settings, recordUndo = true) => {
             if (recordUndo) recordHistory(project);
-            setProject((prev) => ({ ...prev, ...settings }));
+            setProject((prev) => ({
+              ...prev,
+              ...settings,
+              // Layers that lasted until the end follow the new duration
+              layers:
+                settings.duration !== undefined
+                  ? fitLayersToDuration(prev.layers, prev.duration, settings.duration)
+                  : prev.layers,
+            }));
           }}
           onDeleteLayer={handleDeleteLayer}
           onDuplicateLayer={handleDuplicateLayer}
           onAlignLayers={handleAlignLayers}
+          onBooleanOperation={handleBooleanOperation}
+          onFlattenBoolean={(id) => handleFlattenBoolean(id)}
+          onUngroupBoolean={(id) => handleUngroupBoolean(id)}
+          onSelectLayer={setSelectedLayerId}
           currentTime={currentTime}
         />
       </div>
@@ -1474,6 +1683,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
         onToggleLayerVisibility={handleToggleLayerVisibility}
         onToggleLayerLock={handleToggleLayerLock}
         onToggleLayerExpanded={handleToggleLayerExpanded}
+        onMoveLayer={handleMoveLayer}
         onAddKeyframe={handleAddKeyframe}
         onDeleteKeyframes={handleDeleteKeyframes}
         onMoveKeyframes={handleMoveKeyframes}

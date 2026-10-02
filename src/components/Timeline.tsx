@@ -25,6 +25,9 @@ import {
   snapToFrame,
 } from '../utils/animationTracks';
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
+import { getAncestors } from '../utils/layerTree';
+import { BOOLEAN_LABELS, LayerDropPosition } from '../utils/booleanGroups';
+import { BOOLEAN_ICONS } from './booleanIcons';
 
 interface TimelineProps {
   project: Project;
@@ -41,6 +44,8 @@ interface TimelineProps {
   onToggleLayerVisibility: (layerId: string) => void;
   onToggleLayerLock: (layerId: string) => void;
   onToggleLayerExpanded: (layerId: string) => void;
+  // A row dragged before / after another one, or into a boolean group
+  onMoveLayer: (layerId: string, refId: string, position: LayerDropPosition) => void;
   onAddKeyframe: (layerId: string, property: AnimatableProperty, time: number) => void;
   onDeleteKeyframes: (refs: KeyframeRef[]) => void;
   onMoveKeyframes: (base: (KeyframeRef & { time: number })[], delta: number) => void;
@@ -122,6 +127,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   onToggleLayerVisibility,
   onToggleLayerLock,
   onToggleLayerExpanded,
+  onMoveLayer,
   onAddKeyframe,
   onDeleteKeyframes,
   onMoveKeyframes,
@@ -184,6 +190,83 @@ export const Timeline: React.FC<TimelineProps> = ({
   const duration = project.duration;
   const totalWidth = duration * pixelsPerSecond;
   const selectedKeys = new Set(selectedKeyframes.map(refKey));
+
+  // Rows shown: the shapes of a boolean group appear under it while it is expanded
+  const rows = project.layers
+    .map((layer) => ({ layer, ancestors: getAncestors(project.layers, layer) }))
+    .filter(({ ancestors }) => ancestors.every((a) => a.expanded));
+
+  // ── Reordering layers by dragging their rows ────────────────────────────────
+  const rowDragRef = useRef<{ layerId: string; startX: number; startY: number; active: boolean } | null>(null);
+  const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ refId: string; position: LayerDropPosition } | null>(null);
+  const dropTargetRef = useRef(dropTarget);
+  dropTargetRef.current = dropTarget;
+  // The click that ends a drag doesn't change the selection
+  const suppressRowClickRef = useRef(false);
+  const lastRootIdRef = useRef<string | null>(null);
+  lastRootIdRef.current = [...project.layers].reverse().find((l) => !l.parentId)?.id ?? null;
+  const onMoveLayerRef = useRef(onMoveLayer);
+  onMoveLayerRef.current = onMoveLayer;
+
+  useEffect(() => {
+    const handleMove = (e: MouseEvent) => {
+      const d = rowDragRef.current;
+      if (!d) return;
+      if (!d.active) {
+        if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 4) return;
+        d.active = true;
+        setDraggingLayerId(d.layerId);
+        document.body.style.cursor = 'grabbing';
+      }
+      const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-row-layer]');
+      if (!row) {
+        // Below the last row: to the very top of the stack
+        const list = layersContainerRef.current?.getBoundingClientRect();
+        const last = lastRootIdRef.current;
+        const below = list && e.clientX >= list.left && e.clientX <= list.right && e.clientY > list.top;
+        setDropTarget(below && last && last !== d.layerId ? { refId: last, position: 'after' } : null);
+        return;
+      }
+      const refId = row.dataset.rowLayer!;
+      const r = row.getBoundingClientRect();
+      const f = (e.clientY - r.top) / r.height;
+      // Boolean groups: the middle drops inside; an expanded one takes everything below its top edge
+      const position: LayerDropPosition =
+        row.dataset.rowGroup === 'expanded'
+          ? f < 0.3 ? 'before' : 'inside'
+          : row.dataset.rowGroup === 'collapsed'
+            ? f < 0.3 ? 'before' : f > 0.7 ? 'after' : 'inside'
+            : f < 0.5 ? 'before' : 'after';
+      setDropTarget(refId === d.layerId ? null : { refId, position });
+    };
+    const handleUp = () => {
+      const d = rowDragRef.current;
+      rowDragRef.current = null;
+      if (!d?.active) return;
+      const target = dropTargetRef.current;
+      if (target) onMoveLayerRef.current(d.layerId, target.refId, target.position);
+      suppressRowClickRef.current = true;
+      setTimeout(() => (suppressRowClickRef.current = false), 0);
+      setDraggingLayerId(null);
+      setDropTarget(null);
+      document.body.style.cursor = '';
+    };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, []);
+
+  // Where the dragged row would land, drawn on the target row
+  const dropStyle = (layerId: string): React.CSSProperties | undefined => {
+    if (dropTarget?.refId !== layerId) return undefined;
+    if (dropTarget.position === 'before') return { boxShadow: 'inset 0 2px 0 0 #0084ff' };
+    if (dropTarget.position === 'after') return { boxShadow: 'inset 0 -2px 0 0 #0084ff' };
+    return { boxShadow: 'inset 0 0 0 1.5px #0084ff', background: 'rgba(0, 132, 255, 0.12)' };
+  };
 
   // Frame stepping
   const stepFrame = (forward: boolean) => {
@@ -785,14 +868,30 @@ export const Timeline: React.FC<TimelineProps> = ({
         >
           {/* Layers List */}
           <div className="divide-y divide-border">
-            {project.layers.map((layer) => {
+            {rows.map(({ layer, ancestors }) => {
               const isSelected = selectedLayerIds.includes(layer.id);
+              const hasChildren = layer.type === 'boolean' && project.layers.some((l) => l.parentId === layer.id);
+              const canExpand = layer.tracks.length > 0 || hasChildren;
+              const BooleanIcon = layer.type === 'boolean' ? BOOLEAN_ICONS[layer.booleanOp ?? 'union'] : null;
+              // A shape inside a hidden group isn't drawn either
+              const hiddenByGroup = ancestors.some((a) => !a.visible);
 
               return (
-                <div key={layer.id} className={isSelected ? 'bg-bento-blue-light' : ''}>
-                  {/* Layer Main Row (Shift / Ctrl + click adds or removes it from the selection) */}
+                <div
+                  key={layer.id}
+                  className={`${isSelected ? 'bg-bento-blue-light' : ''} ${draggingLayerId === layer.id ? 'opacity-50' : ''}`}
+                >
+                  {/* Layer Main Row (Shift / Ctrl + click adds or removes it from the selection;
+                      dragging it changes its place in the stacking order) */}
                   <div
+                    data-row-layer={layer.id}
+                    data-row-group={layer.type === 'boolean' ? (hasChildren && layer.expanded ? 'expanded' : 'collapsed') : undefined}
+                    onMouseDown={(e) => {
+                      if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+                      rowDragRef.current = { layerId: layer.id, startX: e.clientX, startY: e.clientY, active: false };
+                    }}
                     onClick={(e) => {
+                      if (suppressRowClickRef.current) return;
                       if (e.shiftKey || e.ctrlKey || e.metaKey) {
                         const ids = isSelected
                           ? selectedLayerIds.filter((id) => id !== layer.id)
@@ -803,7 +902,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                       }
                     }}
                     onContextMenu={(e) => handleRowContextMenu(e, layer.id)}
-                    className={`h-8 px-2 flex items-center justify-between cursor-pointer hover:bg-accent transition-colors box-border ${
+                    style={{ paddingLeft: 8 + ancestors.length * 14, ...dropStyle(layer.id) }}                    className={`h-8 pr-2 flex items-center justify-between cursor-pointer hover:bg-accent transition-colors box-border ${
                       isSelected ? 'text-bento-blue font-medium' : 'text-foreground'
                     }`}
                   >
@@ -813,11 +912,11 @@ export const Timeline: React.FC<TimelineProps> = ({
                           e.stopPropagation();
                           onToggleLayerExpanded(layer.id);
                         }}
-                        disabled={layer.tracks.length === 0}
+                        disabled={!canExpand}
                         className={`p-0.5 text-muted-foreground hover:text-foreground ${
-                          layer.tracks.length === 0 ? 'invisible' : ''
+                          !canExpand ? 'invisible' : ''
                         }`}
-                        data-tooltip="Mostrar parámetros animados"
+                        data-tooltip={hasChildren ? 'Mostrar las formas del grupo y sus parámetros animados' : 'Mostrar parámetros animados'}
                       >
                         {layer.expanded ? (
                           <ChevronDown className="w-3 h-3" />
@@ -856,7 +955,13 @@ export const Timeline: React.FC<TimelineProps> = ({
                         )}
                       </button>
 
-                      <span className="truncate text-xs">{layer.name}</span>
+                      {BooleanIcon && (
+                        <BooleanIcon
+                          className="w-3.5 h-3.5 shrink-0 text-bento-blue"
+                          data-tooltip={`Grupo booleano: ${BOOLEAN_LABELS[layer.booleanOp ?? 'union'].name}`}
+                        />
+                      )}
+                      <span className={`truncate text-xs ${hiddenByGroup ? 'opacity-50' : ''}`}>{layer.name}</span>
                     </div>
                   </div>
 
@@ -942,7 +1047,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
             {/* Tracks Content Area (ends where the project ends) */}
             <div style={{ width: `${totalWidth}px` }} className="divide-y divide-border border-b border-border">
-              {project.layers.map((layer) => {
+              {rows.map(({ layer }) => {
                 const isSelected = selectedLayerIds.includes(layer.id);
                 const range = getLayerKeyframeRange(layer);
                 const barStartX = range ? timeToX(range.start) : 0;
