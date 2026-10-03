@@ -31,6 +31,7 @@ En un mundo donde las herramientas de motion design suelen ser pesadas, costosas
 - **Curvas de suavizado** spring, Bézier, ease-in-out, bounce y lineal, con vista previa en vivo.
 - **Importación de animaciones Lottie** y de proyectos propios, desde un botón o arrastrando el archivo.
 - **Exportación a GIF, MP4, WebM, SVG animado, Lottie (normal u optimizado) y JSON**, con resolución, FPS, antialiasing y fondo transparente configurables.
+- **Carpeta local**: el espacio de trabajo puede guardarse en una carpeta de tu equipo, con un JSON por proyecto y una carpeta por cada carpeta de Inicio (Chrome, Edge, Brave u Opera de escritorio).
 - **Deshacer y rehacer** con los atajos de siempre.
 - **Interfaz en español e inglés**, tema claro y oscuro, e instalación como aplicación (PWA).
 

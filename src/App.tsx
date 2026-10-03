@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Project } from './types/animation';
 import { NORI_INTRO_PROJECT } from './utils/noriIntro';
 import {
@@ -19,6 +19,7 @@ import {
   setLastView,
 } from './utils/projectStorage';
 import { importProjectFile } from './utils/projectFiles';
+import { BROWSER_CLEARED_KEY, getStorageStatus, isWorkspaceAvailable, useStorageStatus } from './utils/folderSync';
 import Editor from './Editor';
 import Home from './components/Home';
 import { useUI } from './lib/ui';
@@ -35,8 +36,14 @@ interface OpenSession {
  * With no project to reopen, Inicio is shown.
  */
 function getInitialSession(): OpenSession | null {
-  const firstVisit = !hasProjectIndex() && !localStorageHas('nori-last-project');
-  migrateLegacyProject();
+  // A linked folder is never a first visit, and neither is a browser that was just cleared
+  // from Almacenamiento (the example project would be the only trace left)
+  const firstVisit =
+    getStorageStatus().mode === 'browser' &&
+    !hasProjectIndex() &&
+    !localStorageHas('nori-last-project') &&
+    !sessionStorageHas(BROWSER_CLEARED_KEY);
+  if (getStorageStatus().mode === 'browser') migrateLegacyProject();
 
   if (!firstVisit && getLastView()?.screen === 'home') return null;
 
@@ -65,11 +72,41 @@ function localStorageHas(key: string) {
   }
 }
 
+function sessionStorageHas(key: string) {
+  try {
+    return sessionStorage.getItem(key) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const { toast } = useUI();
   // The whole interface renders again in the new language when it changes
   useLanguage();
   const [session, setSession] = useState<OpenSession | null>(getInitialSession);
+  const storage = useStorageStatus();
+
+  // The folder was renamed, moved or deleted (on opening Nori or while working)
+  const connectionLost = storage.mode === 'folder' && storage.state === 'unavailable';
+  // Once per loss (effects run twice in development)
+  const lostWarnedRef = useRef(false);
+  useEffect(() => {
+    if (!connectionLost) lostWarnedRef.current = false;
+    else if (!lostWarnedRef.current) {
+      lostWarnedRef.current = true;
+      toast(t('Se perdió la conexión con la carpeta "{name}". Vuelve a vincularla desde Inicio o Almacenamiento.', { name: storage.mode === 'folder' ? storage.name : '' }), 'error');
+    }
+  }, [connectionLost]);
+
+  // The linked folder stopped accepting changes while working: they wait in memory until
+  // the permission is granted again from Inicio
+  const permissionLost = storage.mode === 'folder' && storage.loaded && storage.state === 'permission';
+  useEffect(() => {
+    if (permissionLost) {
+      toast(t('No se pudo guardar en la carpeta vinculada. Tus cambios se guardarán cuando vuelvas a dar permiso desde Inicio.'), 'warning');
+    }
+  }, [permissionLost]);
 
   // Remember whether the editor is open, so a reload comes back to it (Inicio stores its own view)
   useEffect(() => {
@@ -89,6 +126,10 @@ export default function App() {
   // New, imported and example projects are stored as a new entry (inside the folder open in
   // Inicio, if any) and opened
   const createAndOpen = (project: Project, message: string, autoplay = false, folderId?: string | null) => {
+    if (!isWorkspaceAvailable()) {
+      toast(t('Primero da permiso a Nori para abrir la carpeta vinculada'), 'warning');
+      return;
+    }
     const stored = createProject(project, folderId);
     if (!stored) {
       toast(t('No se pudo guardar el proyecto en el navegador (espacio insuficiente o almacenamiento bloqueado)'), 'error');

@@ -1,9 +1,10 @@
 import { Project } from '../types/animation';
 import { getLanguage, t } from '../i18n';
 
-// Every project lives in this browser's localStorage: an index with the metadata of all
-// of them and one entry per project with its data. The id of the last opened project is
-// kept so it reopens on the next visit.
+// The workspace is an index with the metadata of every project, the list of folders and one
+// entry per project with its data. It lives in this browser's localStorage, or, when a local
+// folder is linked (see folderSync.ts), in memory while folderSync writes it to the folder.
+// The id of the last opened project and the last view are always kept in localStorage.
 const INDEX_KEY = 'nori-projects';
 const PROJECT_KEY_PREFIX = 'nori-project:';
 const LAST_PROJECT_KEY = 'nori-last-project-id';
@@ -31,6 +32,39 @@ export interface FolderMeta {
 
 const projectKey = (id: string) => `${PROJECT_KEY_PREFIX}${id}`;
 
+/** Key-value store that holds the workspace; setItem throws when the value can't be stored */
+export interface WorkspaceStore {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+  keys(): string[];
+}
+
+export const browserStore: WorkspaceStore = {
+  getItem: (key) => localStorage.getItem(key),
+  setItem: (key, value) => localStorage.setItem(key, value),
+  removeItem: (key) => localStorage.removeItem(key),
+  keys: () => {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key !== null) keys.push(key);
+    }
+    return keys;
+  },
+};
+
+let store: WorkspaceStore = browserStore;
+
+/** Where the workspace is read and written from now on (null: back to localStorage) */
+export function setWorkspaceStore(next: WorkspaceStore | null) {
+  store = next ?? browserStore;
+}
+
+/** Keys that belong to the workspace (the rest are preferences of this browser) */
+export const isWorkspaceKey = (key: string) =>
+  key === INDEX_KEY || key === FOLDERS_KEY || key.startsWith(PROJECT_KEY_PREFIX);
+
 export const newProjectId = () => `project_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
 export function isValidProject(parsed: any): parsed is Project {
@@ -45,7 +79,7 @@ export function isValidProject(parsed: any): parsed is Project {
 
 function readIndex(): ProjectMeta[] {
   try {
-    const raw = localStorage.getItem(INDEX_KEY);
+    const raw = store.getItem(INDEX_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed.filter((m) => m && typeof m.id === 'string') : [];
   } catch {
@@ -56,7 +90,7 @@ function readIndex(): ProjectMeta[] {
 
 function writeIndex(index: ProjectMeta[]): boolean {
   try {
-    localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+    store.setItem(INDEX_KEY, JSON.stringify(index));
     return true;
   } catch {
     return false;
@@ -66,7 +100,7 @@ function writeIndex(index: ProjectMeta[]): boolean {
 /** True once the browser has stored projects at least once (false on the very first visit) */
 export function hasProjectIndex(): boolean {
   try {
-    return localStorage.getItem(INDEX_KEY) !== null;
+    return store.getItem(INDEX_KEY) !== null;
   } catch {
     return false;
   }
@@ -109,7 +143,7 @@ export function getProjectMeta(id: string): ProjectMeta | null {
 
 export function loadProject(id: string): Project | null {
   try {
-    const raw = localStorage.getItem(projectKey(id));
+    const raw = store.getItem(projectKey(id));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return isValidProject(parsed) ? { ...parsed, id } : null;
@@ -129,8 +163,8 @@ export function saveProject(project: Project): boolean {
     const data = JSON.stringify(project);
     const index = readIndex();
     const meta = index.find((m) => m.id === project.id);
-    if (meta && localStorage.getItem(key) === data) return true;
-    localStorage.setItem(key, data);
+    if (meta && store.getItem(key) === data) return true;
+    store.setItem(key, data);
     const now = Date.now();
     const nextMeta: ProjectMeta = meta
       ? { ...meta, title: project.title, updatedAt: now }
@@ -152,7 +186,7 @@ export function createProject(project: Project, folderId?: string | null): Proje
     return stored;
   }
   try {
-    localStorage.removeItem(projectKey(stored.id));
+    store.removeItem(projectKey(stored.id));
   } catch {}
   return null;
 }
@@ -186,7 +220,7 @@ export function restoreProject(id: string): boolean {
 /** Removes a project and its data for good */
 export function deleteProjectForever(id: string): boolean {
   try {
-    localStorage.removeItem(projectKey(id));
+    store.removeItem(projectKey(id));
   } catch {}
   return writeIndex(readIndex().filter((m) => m.id !== id));
 }
@@ -195,7 +229,7 @@ export function emptyTrash(): number {
   const trashed = listTrashedProjects();
   trashed.forEach((m) => {
     try {
-      localStorage.removeItem(projectKey(m.id));
+      store.removeItem(projectKey(m.id));
     } catch {}
   });
   writeIndex(readIndex().filter((m) => !m.deletedAt));
@@ -208,7 +242,7 @@ export const newFolderId = () => `folder_${Date.now()}_${Math.random().toString(
 
 function readFolders(): FolderMeta[] {
   try {
-    const raw = localStorage.getItem(FOLDERS_KEY);
+    const raw = store.getItem(FOLDERS_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed)
       ? parsed.filter((f) => f && typeof f.id === 'string' && typeof f.name === 'string')
@@ -220,7 +254,7 @@ function readFolders(): FolderMeta[] {
 
 function writeFolders(folders: FolderMeta[]): boolean {
   try {
-    localStorage.setItem(FOLDERS_KEY, JSON.stringify(folders));
+    store.setItem(FOLDERS_KEY, JSON.stringify(folders));
     return true;
   } catch {
     return false;
@@ -292,36 +326,71 @@ function nextFreeId(make: () => string, taken: Set<string>) {
   return id;
 }
 
+/** True when the workspace has no projects (trash included) and no folders */
+export const isWorkspaceEmpty = (workspace: WorkspaceSnapshot) =>
+  workspace.projects.length === 0 && workspace.folders.length === 0;
+
+/** Keys and values that hold a workspace in a store */
+export function workspaceEntries(workspace: WorkspaceSnapshot): [string, string][] {
+  return [
+    [INDEX_KEY, JSON.stringify(workspace.projects.map((p) => p.meta))],
+    [FOLDERS_KEY, JSON.stringify(workspace.folders)],
+    ...workspace.projects.map(
+      ({ meta, project }) => [projectKey(meta.id), JSON.stringify({ ...project, id: meta.id })] as [string, string]
+    ),
+  ];
+}
+
+/**
+ * Same folders and same projects (data, folder, trash and edit date). Used to know whether a
+ * linked folder already holds the workspace of this browser.
+ */
+export function sameWorkspace(a: WorkspaceSnapshot, b: WorkspaceSnapshot): boolean {
+  const signature = (w: WorkspaceSnapshot) =>
+    JSON.stringify([
+      [...w.folders].map((f) => [f.id, f.name]).sort(),
+      [...w.projects]
+        .map(({ meta, project }) => [
+          meta.id,
+          meta.folderId ?? '',
+          meta.deletedAt ?? 0,
+          meta.updatedAt,
+          JSON.stringify({ ...project, id: meta.id }),
+        ])
+        .sort(),
+    ]);
+  return signature(a) === signature(b);
+}
+
+/** Removes the workspace from localStorage (preferences, the last view and the last project stay) */
+export function clearBrowserWorkspace() {
+  try {
+    browserStore.keys().filter(isWorkspaceKey).forEach((key) => localStorage.removeItem(key));
+  } catch {}
+}
+
 /**
  * Writes a workspace from a backup. 'replace' removes every current project and folder
  * first; 'merge' keeps them and adds the backup next to them (an identical project that is
  * already stored is skipped, one that clashes with an existing id gets a new one).
- * If anything can't be stored, localStorage goes back to how it was and false is returned.
+ * If anything can't be stored, the store goes back to how it was and false is returned.
  */
 export function writeWorkspace(
   workspace: WorkspaceSnapshot,
   mode: 'merge' | 'replace'
 ): { ok: boolean; projects: number; folders: number } {
-  // Copy of every Nori key, to roll back on failure
+  // Copy of the whole workspace, to roll back on failure
   const snapshot = new Map<string, string>();
   try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith('nori-')) snapshot.set(key, localStorage.getItem(key) ?? '');
-    }
+    store.keys().filter(isWorkspaceKey).forEach((key) => snapshot.set(key, store.getItem(key) ?? ''));
   } catch {
     return { ok: false, projects: 0, folders: 0 };
   }
 
   const rollback = () => {
     try {
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && (key === INDEX_KEY || key === FOLDERS_KEY || key.startsWith(PROJECT_KEY_PREFIX))) {
-          localStorage.removeItem(key);
-        }
-      }
-      snapshot.forEach((value, key) => localStorage.setItem(key, value));
+      store.keys().filter(isWorkspaceKey).forEach((key) => store.removeItem(key));
+      snapshot.forEach((value, key) => store.setItem(key, value));
     } catch {}
   };
 
@@ -329,8 +398,10 @@ export function writeWorkspace(
     let index: ProjectMeta[] = [];
     let folders: FolderMeta[] = [];
     if (mode === 'replace') {
-      readIndex().forEach((m) => localStorage.removeItem(projectKey(m.id)));
-      localStorage.removeItem(LAST_PROJECT_KEY);
+      readIndex().forEach((m) => store.removeItem(projectKey(m.id)));
+      try {
+        localStorage.removeItem(LAST_PROJECT_KEY);
+      } catch {}
     } else {
       index = readIndex();
       folders = readFolders();
@@ -350,19 +421,19 @@ export function writeWorkspace(
     let addedProjects = 0;
     for (const { meta, project } of workspace.projects) {
       const data = JSON.stringify({ ...project, id: meta.id });
-      if (projectIds.has(meta.id) && localStorage.getItem(projectKey(meta.id)) === data) continue;
+      if (projectIds.has(meta.id) && store.getItem(projectKey(meta.id)) === data) continue;
       const id = projectIds.has(meta.id) ? nextFreeId(newProjectId, projectIds) : meta.id;
       const { folderId, ...rest } = meta;
       const nextMeta: ProjectMeta = { ...rest, id, title: project.title };
       if (folderId && folderIds.has(folderId)) nextMeta.folderId = folderId;
-      localStorage.setItem(projectKey(id), JSON.stringify({ ...project, id }));
+      store.setItem(projectKey(id), JSON.stringify({ ...project, id }));
       index.push(nextMeta);
       projectIds.add(id);
       addedProjects++;
     }
 
-    localStorage.setItem(FOLDERS_KEY, JSON.stringify(folders));
-    localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+    store.setItem(FOLDERS_KEY, JSON.stringify(folders));
+    store.setItem(INDEX_KEY, JSON.stringify(index));
     return { ok: true, projects: addedProjects, folders: addedFolders };
   } catch {
     rollback();
@@ -387,7 +458,7 @@ export function setLastProjectId(id: string) {
 /** Screen shown when the page was left: the editor (with the last project) or a view of Inicio */
 export type LastView =
   | { screen: 'editor' }
-  | { screen: 'home'; section?: 'projects' | 'trash' | 'backup' | 'about'; folderId?: string | null };
+  | { screen: 'home'; section?: 'projects' | 'trash' | 'storage' | 'about'; folderId?: string | null };
 
 export function getLastView(): LastView | null {
   try {

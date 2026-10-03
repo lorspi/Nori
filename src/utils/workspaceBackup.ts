@@ -46,14 +46,17 @@ function slug(text: string) {
   );
 }
 
-function backupFileName(date = new Date()) {
+/** Name of a backup file; the label tells apart the backups Nori leaves in a linked folder */
+export function backupFileName(label?: string, date = new Date()) {
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `nori-respaldo-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}.zip`;
+  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return label
+    ? `nori-respaldo-${day}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}-${label}.zip`
+    : `nori-respaldo-${day}.zip`;
 }
 
-/** Packs every project and folder of this browser into a zip and downloads it */
-export function downloadWorkspaceBackup(): BackupSummary & { fileName: string } {
-  const { folders, projects } = readWorkspace();
+/** The zip of a workspace: a manifest plus one Nori JSON per project */
+export function buildWorkspaceBackup({ folders, projects }: WorkspaceSnapshot): Uint8Array {
   const files: Zippable = {};
   const manifestProjects: ManifestProject[] = projects.map(({ meta, project }) => {
     const file = `proyectos/${slug(project.title)}_${meta.id}.nori.json`;
@@ -69,9 +72,14 @@ export function downloadWorkspaceBackup(): BackupSummary & { fileName: string } 
     projects: manifestProjects,
   };
   files[MANIFEST_NAME] = strToU8(JSON.stringify(manifest, null, 2));
+  return zipSync(files, { level: 6 });
+}
 
-  const zipped = zipSync(files, { level: 6 });
-  const blob = new Blob([zipped], { type: 'application/zip' });
+/** Packs every project and folder of the workspace into a zip and downloads it */
+export function downloadWorkspaceBackup(): BackupSummary & { fileName: string } {
+  const workspace = readWorkspace();
+  const zipped = buildWorkspaceBackup(workspace);
+  const blob = new Blob([zipped as BlobPart], { type: 'application/zip' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -80,7 +88,7 @@ export function downloadWorkspaceBackup(): BackupSummary & { fileName: string } 
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return { fileName: a.download, projects: projects.length, folders: folders.length };
+  return { fileName: a.download, projects: workspace.projects.length, folders: workspace.folders.length };
 }
 
 /** Reads a backup zip; throws with a readable message when it isn't a valid backup */

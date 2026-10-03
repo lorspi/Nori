@@ -28,6 +28,17 @@ export default function ThemeToggle() {
   // Followed while the theme is 'system'
   const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(getSystemTheme);
 
+  // Theme applied from the preferences of a linked folder
+  useEffect(() => {
+    const handler = () => {
+      try {
+        setTheme((localStorage.getItem(THEME_KEY) as Theme) || 'system');
+      } catch {}
+    };
+    window.addEventListener('nori-theme-change', handler);
+    return () => window.removeEventListener('nori-theme-change', handler);
+  }, []);
+
   useEffect(() => {
     const mq = window.matchMedia(DARK_QUERY);
     const handler = () => setSystemTheme(mq.matches ? 'dark' : 'light');

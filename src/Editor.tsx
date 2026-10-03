@@ -11,6 +11,7 @@ import {
   TimelineClipboard,
 } from './types/animation';
 import { saveProject } from './utils/projectStorage';
+import { guardUnload } from './utils/folderSync';
 import { downloadProjectJson } from './utils/projectFiles';
 import { TopBar, ToolMode, ShapeType } from './components/TopBar';
 import { DEFAULT_SHAPE, getShapePathData, normalizePathData } from './utils/pathGeometry';
@@ -175,7 +176,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
     toast(msg, type);
   };
 
-  // Save every change to the browser's localStorage (debounced)
+  // Save every change to the workspace (localStorage or the linked folder), debounced
   const storageWarnedRef = useRef(false);
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -190,9 +191,14 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
   // Flush pending changes when the page is closed or the editor goes back to Inicio
   useEffect(() => {
     const flush = () => saveProject(projectRef.current);
-    window.addEventListener('beforeunload', flush);
+    // With a linked folder, the last change may still be on its way to the folder
+    const flushOnUnload = (e: BeforeUnloadEvent) => {
+      flush();
+      guardUnload(e);
+    };
+    window.addEventListener('beforeunload', flushOnUnload);
     return () => {
-      window.removeEventListener('beforeunload', flush);
+      window.removeEventListener('beforeunload', flushOnUnload);
       flush();
     };
   }, []);

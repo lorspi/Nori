@@ -26,7 +26,9 @@ import {
   FolderSimple,
   CaretRight,
   PencilSimple,
-  Archive,
+  LockKey,
+  CircleNotch,
+  WarningCircle,
 } from '@phosphor-icons/react';
 import { Project } from '../types/animation';
 import { useUI } from '../lib/ui';
@@ -71,9 +73,17 @@ import { ExportModal } from './ExportModal';
 import { PasteSvgModal } from './PasteSvgModal';
 import { FigmaImportModal } from './FigmaImportModal';
 import { MenuButton, MenuButtonItem } from './MenuButton';
-import { BackupSection } from './BackupSection';
+import { StorageSection, useFolderLinking } from './StorageSection';
+import { StorageBadge, useGrantFolderAccess } from './StorageBadge';
+import {
+  TRASH_DIR,
+  isFolderSupported,
+  isWorkspaceAvailable,
+  needsFolderAttention,
+  useStorageStatus,
+} from '../utils/folderSync';
 
-type Section = 'projects' | 'trash' | 'backup' | 'about';
+type Section = 'projects' | 'trash' | 'storage' | 'about';
 
 // Drop target while a project card is dragged: a folder id, or the root of Inicio
 type DropTarget = string | typeof ROOT_TARGET;
@@ -130,7 +140,10 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     const view = getLastView();
     return view?.screen === 'home' ? view : null;
   });
-  const [section, setSection] = useState<Section>(initialView?.section ?? 'projects');
+  // "Respaldo" (before 1.5.0) is now "Almacenamiento"
+  const [section, setSection] = useState<Section>(() =>
+    (initialView?.section as string) === 'backup' ? 'storage' : initialView?.section ?? 'projects'
+  );
   // Folder open in the projects section (null: the root of Inicio)
   const [folderId, setFolderId] = useState<string | null>(initialView?.folderId ?? null);
 
@@ -156,6 +169,16 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     setFolders(listFolders());
     setUsage(getStorageUsage());
   }, []);
+
+  // Linked folder: read again (permission granted, changes from another tab), linked or unlinked
+  const storage = useStorageStatus();
+  const grantFolderAccess = useGrantFolderAccess();
+  const linked = storage.mode === 'folder';
+  const available = isWorkspaceAvailable(storage);
+  const folderAttention = needsFolderAttention(storage);
+  useEffect(() => {
+    refresh();
+  }, [storage.revision, storage.mode, refresh]);
 
   const folderIds = useMemo(() => new Set(folders.map((f) => f.id)), [folders]);
   const currentFolder = folderId ? folders.find((f) => f.id === folderId) ?? null : null;
@@ -649,12 +672,13 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
         </nav>
 
         <div className="p-3 border-t border-border bg-secondary mt-auto flex flex-col gap-3">
-          {/* Space used in this browser */}
+          {/* Space used in this browser (a linked folder has no such limit) */}
+          {!linked && (
           <div className="px-1 space-y-1.5" data-tooltip={t('Espacio aproximado que ocupan tus proyectos en el almacenamiento local del navegador')}>
             <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
               <span className="flex items-center gap-1">
                 <HardDrives className="w-3 h-3" />
-                {t('Almacenamiento')}
+                {t('Espacio usado')}
                 {warningDismissed && (
                   <span
                     className="text-muted-foreground hover:text-foreground transition-colors cursor-help"
@@ -676,18 +700,24 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
               />
             </div>
           </div>
+          )}
 
           <button
-            onClick={() => setSection('backup')}
-            className={`w-full px-3 py-2 border rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer font-semibold leading-none shadow-card ${
-              section === 'backup'
+            onClick={() => setSection('storage')}
+            className={`relative w-full px-3 py-2 border rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer font-semibold leading-none shadow-card ${
+              section === 'storage'
                 ? 'bg-accent border-ring/40 text-foreground'
                 : 'bg-card hover:bg-accent border-border text-foreground'
             }`}
-            data-tooltip={t('Guarda todo tu espacio de trabajo en un archivo o pásalo a otro navegador')}
+            data-tooltip={
+              folderAttention
+                ? t('Nori necesita tu permiso para abrir la carpeta vinculada')
+                : t('Carpeta local, respaldos y datos del navegador')
+            }
           >
-            <Archive className="w-4 h-4 text-muted-foreground" />
-            {t('Respaldo')}
+            <HardDrives className="w-4 h-4 text-muted-foreground" />
+            {t('Almacenamiento')}
+            {folderAttention && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-full" />}
           </button>
 
           <button
@@ -709,16 +739,19 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
       <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
         {section === 'about' ? (
           <AboutNori />
-        ) : section === 'backup' ? (
-          <BackupSection
+        ) : section === 'storage' ? (
+          <StorageSection
             projects={projects}
             trashed={trashed}
             folders={folders}
             formatRelative={formatRelative}
             onRestored={refresh}
           />
+        ) : !available ? (
+          <FolderAccessGate onGrant={grantFolderAccess} onOpenStorage={() => setSection('storage')} />
         ) : section === 'trash' ? (
           <TrashSection
+            linked={linked}
             trashed={trashed}
             onRestore={handleRestore}
             onDeleteForever={handleDeleteForever}
@@ -728,7 +761,7 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
           <div className="flex-1 overflow-y-auto p-6 lg:p-8">
             <div className="max-w-6xl mx-auto space-y-8 animate-fade-in">
               {/* Header */}
-              <div className="border-b border-border pb-6">
+              <div className="border-b border-border pb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 {currentFolder ? (
                   <div className="min-w-0">
                     <h1 className="text-2xl font-black text-foreground font-heading flex items-center gap-2 min-w-0">
@@ -767,20 +800,29 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                     </p>
                   </div>
                 )}
+                <StorageBadge onOpenStorage={() => setSection('storage')} />
               </div>
 
               {/* Where the projects live (once closed, it stays in the sidebar's storage info) */}
-              {!warningDismissed && (
+              {!warningDismissed && !linked && (
                 <div className="p-4 bg-bento-orange-light border border-bento-orange/30 rounded-xl flex items-start gap-3 text-xs leading-relaxed">
                   <Warning className="w-5 h-5 shrink-0 text-bento-orange" />
                   <div className="text-foreground flex-1">
                     <span className="font-semibold block mb-0.5 text-bento-orange">{t(STORAGE_WARNING_TITLE)}</span>
                     {t(STORAGE_WARNING_TEXT)}
+                    {isFolderSupported() && (
+                      <button
+                        onClick={() => setSection('storage')}
+                        className="block mt-1.5 font-semibold text-bento-orange hover:underline cursor-pointer"
+                      >
+                        {t('Guardarlos en una carpeta de tu equipo →')}
+                      </button>
+                    )}
                   </div>
                   <button
                     onClick={dismissWarning}
                     className="p-1 -m-1 rounded-lg text-bento-orange/70 hover:text-bento-orange hover:bg-bento-orange/10 transition-colors cursor-pointer shrink-0"
-                    data-tooltip={t('Cerrar aviso (seguirá disponible en el icono de información de Almacenamiento)')}
+                    data-tooltip={t('Cerrar aviso (seguirá disponible en el icono de información de Espacio usado)')}
                     aria-label={t('Cerrar aviso')}
                   >
                     <X className="w-4 h-4" />
@@ -917,6 +959,89 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
         onClose={() => setIsFigmaImportOpen(false)}
         onImport={(svgText) => runImport(() => importFigmaProject(svgText))}
       />
+    </div>
+  );
+}
+
+// ─── Linked folder waiting for permission ─────────────────────────────────────
+
+// Inicio while the linked folder can't be read: nothing to list or create until it opens.
+// When the connection to the folder was lost (renamed, moved or deleted), it is linked again.
+function FolderAccessGate({ onGrant, onOpenStorage }: { onGrant: () => void; onOpenStorage: () => void }) {
+  const storage = useStorageStatus();
+  // Inicio reads the workspace again on its own once the folder is linked
+  const { link, linking, dialog } = useFolderLinking(() => {});
+  const name = storage.mode === 'folder' ? storage.name : '';
+  const state = storage.mode === 'folder' ? storage.state : 'ready';
+  return (
+    <div className="flex-1 overflow-y-auto p-6 lg:p-8">
+      <div className="max-w-6xl mx-auto space-y-8 animate-fade-in">
+        <div className="border-b border-border pb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-black text-foreground font-heading">{t('Inicio')}</h1>
+            <p className="text-muted-foreground text-xs mt-1.5 leading-normal max-w-xl">
+              {t('Tu espacio de trabajo está en la carpeta "{name}" de tu equipo.', { name })}
+            </p>
+          </div>
+          <StorageBadge onOpenStorage={onOpenStorage} />
+        </div>
+
+        <div
+          className={`text-center py-16 px-6 border rounded-2xl ${
+            state === 'unavailable' ? 'border-destructive/30 bg-destructive/5' : 'border-dashed border-border'
+          }`}
+        >
+          {state === 'loading' ? (
+            <CircleNotch className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-50 animate-spin" />
+          ) : state === 'unavailable' ? (
+            <WarningCircle className="w-12 h-12 mx-auto mb-3 text-destructive opacity-70" />
+          ) : (
+            <LockKey className="w-12 h-12 mx-auto mb-3 text-bento-blue opacity-70" />
+          )}
+          <p className="text-sm font-semibold text-foreground">
+            {state === 'loading'
+              ? t('Abriendo la carpeta…')
+              : state === 'unavailable'
+                ? t('Se perdió la conexión con la carpeta "{name}"', { name })
+                : t('Nori necesita tu permiso para abrir la carpeta "{name}"', { name })}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto leading-relaxed">
+            {state === 'unavailable'
+              ? t('Puede que se haya renombrado, movido o borrado. Vuelve a vincularla para seguir trabajando: si la renombraste o la moviste, elígela con su nuevo nombre o en su nueva ubicación. Tus proyectos siguen en ella.')
+              : t('Por seguridad, el navegador pide permiso cada vez que Nori abre una carpeta de tu equipo. Tus proyectos aparecerán aquí en cuanto lo concedas.')}
+          </p>
+          {state !== 'loading' && (
+            <div className="flex items-center justify-center gap-2 mt-5">
+              {state === 'unavailable' ? (
+                <button
+                  onClick={link}
+                  disabled={linking}
+                  className="h-8 px-3 rounded-lg border bg-bento-blue border-bento-blue text-white hover:bg-bento-blue/90 shadow-card text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {linking ? <CircleNotch className="w-4 h-4 animate-spin" /> : <FolderSimplePlus className="w-4 h-4" />}
+                  {linking ? t('Vinculando…') : t('Volver a vincular…')}
+                </button>
+              ) : (
+                <button
+                  onClick={onGrant}
+                  className="h-8 px-3 rounded-lg border bg-bento-blue border-bento-blue text-white hover:bg-bento-blue/90 shadow-card text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <LockKey className="w-4 h-4" />
+                  {t('Dar permiso')}
+                </button>
+              )}
+              <button
+                onClick={onOpenStorage}
+                className="h-8 px-3 rounded-lg border bg-card border-border text-foreground hover:bg-accent text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <HardDrives className="w-4 h-4 text-muted-foreground" />
+                {t('Ir a Almacenamiento')}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      {dialog}
     </div>
   );
 }
@@ -1085,13 +1210,15 @@ function FolderCard({ folder, count, dropProps, isDropTarget, onOpen, onOpenMenu
 // ─── Trash ────────────────────────────────────────────────────────────────────
 
 interface TrashSectionProps {
+  /** The workspace is in a linked folder (the trash is its _papelera directory) */
+  linked: boolean;
   trashed: ProjectMeta[];
   onRestore: (meta: ProjectMeta) => void;
   onDeleteForever: (meta: ProjectMeta) => void;
   onEmpty: () => void;
 }
 
-function TrashSection({ trashed, onRestore, onDeleteForever, onEmpty }: TrashSectionProps) {
+function TrashSection({ linked, trashed, onRestore, onDeleteForever, onEmpty }: TrashSectionProps) {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background animate-fade-in">
       <div className="p-6 border-b border-border bg-card shrink-0">
@@ -1102,7 +1229,9 @@ function TrashSection({ trashed, onRestore, onDeleteForever, onEmpty }: TrashSec
               {t('Papelera de reciclaje')}
             </h2>
             <p className="text-xs text-muted-foreground mt-1">
-              {t('Los proyectos borrados se mueven aquí. Puedes restaurarlos o eliminarlos permanentemente; mientras estén aquí siguen ocupando espacio en el navegador.')}
+              {linked
+                ? t('Los proyectos borrados se mueven aquí (en la carpeta vinculada, a {dir}). Puedes restaurarlos o eliminarlos permanentemente.', { dir: TRASH_DIR })
+                : t('Los proyectos borrados se mueven aquí. Puedes restaurarlos o eliminarlos permanentemente; mientras estén aquí siguen ocupando espacio en el navegador.')}
             </p>
           </div>
           {trashed.length > 0 && (

@@ -5,9 +5,11 @@ import App from './App.tsx';
 import { UIProvider } from './lib/ui.tsx';
 import { TooltipLayer } from './components/Tooltip.tsx';
 import { DesktopOnlyGate } from './components/DesktopOnlyGate.tsx';
+import { initWorkspaceStorage } from './utils/folderSync.ts';
 import './index.css';
 
-createRoot(document.getElementById('root')!).render(
+// With a linked local folder, its workspace is read before the interface starts
+initWorkspaceStorage().finally(() => createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* Default every Phosphor icon to the duotone weight app-wide. Individual
         icons still control their size via Tailwind width/height classes. */}
@@ -20,7 +22,7 @@ createRoot(document.getElementById('root')!).render(
       </UIProvider>
     </IconContext.Provider>
   </StrictMode>,
-);
+));
 
 // Microsoft Clarity analytics. The ID and host come from a local, untracked
 // .env file, so clones of this repo never report to the original project.

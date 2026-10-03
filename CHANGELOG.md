@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.5.0] — 2026-10-02
+
+### Added
+
+- **Espacio de trabajo en una carpeta local**
+  En Almacenamiento, "Vincular carpeta…" pide elegir una carpeta del equipo y, desde ese momento, el espacio de trabajo se guarda en ella en lugar de en el navegador: cada cambio se escribe en la carpeta a los pocos instantes, sin el límite de unos 5 MB del navegador, y la carpeta se puede copiar, incluir en copias de seguridad o sincronizar con Drive, Dropbox u OneDrive. Funciona en los navegadores que permiten a una página guardar archivos en una carpeta (Chrome, Edge, Brave u Opera de escritorio); en los demás la opción aparece desactivada con una explicación.
+  Dentro de la carpeta, cada proyecto es un JSON de Nori que también se puede abrir por separado: los de la raíz de Inicio están en la raíz, cada carpeta de Inicio es una carpeta con sus proyectos y los de la papelera están en `_papelera`. El archivo `nori-espacio.json` guarda las carpetas, los datos de cada proyecto (con su fecha de edición, para el "Editado hace…") y las preferencias (idioma y tema). Renombrar o mover un proyecto o una carpeta en Nori renombra o mueve su archivo, y una carpeta que se queda vacía al renombrarla o eliminarla desaparece.
+
+- **Vincular una carpeta que no está vacía**
+  Una carpeta vacía (o con solo archivos del sistema como `.DS_Store` o `desktop.ini`) recibe directamente todo el espacio de trabajo del navegador. Si la carpeta ya tiene un espacio de trabajo de Nori:
+  - Si es el mismo que el del navegador, o uno de los dos está vacío, se vincula sin preguntar.
+  - Si son distintos, Nori pregunta si combinar los dos, si el del navegador sobrescribe la carpeta o si el de la carpeta sobrescribe el navegador. En cualquier caso deja en `_respaldos` un .zip con el espacio de trabajo descartado (al combinar, el del navegador). Si gana la carpeta, también se aplican sus preferencias.
+  - Si además tiene archivos que no forman parte de Nori, los muestra y deja elegir entre ignorarlos, moverlos a la subcarpeta `_archivos-ajenos` o eliminarlos.
+  Una carpeta con otros archivos y sin un espacio de trabajo de Nori no se puede vincular: Nori avisa de que hace falta una carpeta vacía o una que ya tenga un espacio de trabajo de Nori, y ofrece elegir otra.
+
+- **Permiso para abrir la carpeta**
+  Por seguridad, el navegador suele pedir permiso de nuevo cada vez que se abre Nori. Mientras falta, Inicio muestra un aviso con el botón "Dar permiso", y un punto rojo, como el de las actualizaciones en "Acerca de Nori", aparece en el botón Almacenamiento y en el indicador de almacenamiento de Inicio, que también pide el permiso con un clic. Si el permiso se pierde mientras se trabaja, los cambios esperan en memoria y se escriben al concederlo; si se intenta cerrar la página con cambios aún sin escribir en la carpeta, el navegador pide confirmación. Si la carpeta se movió o se borró, Nori lo indica y permite reintentar o desvincularla.
+
+- **Indicador de almacenamiento en Inicio**
+  Arriba a la derecha de Inicio, como en Kora, un recuadro indica dónde se guardan los proyectos: "Navegador" o "Carpeta local", o si falta el permiso o la carpeta no está disponible. Un clic lleva a Almacenamiento (o pide el permiso, si falta).
+
+- **Desvincular la carpeta**
+  "Desvincular" devuelve el espacio de trabajo al almacenamiento del navegador; los archivos de la carpeta se quedan como copia y se pueden volver a vincular. Si el espacio de trabajo no cabe en el navegador, no se cambia nada y Nori lo avisa.
+
+- **Borrar los datos del navegador**
+  Para no dejar rastro, por ejemplo en un equipo compartido, "Borrar datos…" en Almacenamiento elimina todo lo que Nori guarda en el navegador: proyectos, carpetas, papelera, preferencias y el vínculo con la carpeta (cuyos archivos no se tocan). La ventana advierte que no se puede deshacer, ofrece descargar un respaldo antes y solo permite continuar tras marcar "Entiendo que esta acción no se puede deshacer". Después la página se recarga vacía, sin volver a crear el proyecto de ejemplo.
+
+### Changed
+
+- **"Respaldo" ahora es "Almacenamiento"**
+  La sección reúne la carpeta local, crear y cargar respaldos y el borrado de los datos del navegador. Con una carpeta vinculada, crear y cargar respaldos funcionan igual sobre el espacio de trabajo de la carpeta.
+
+- **Sin medidor de espacio con una carpeta vinculada**
+  El medidor de la barra lateral de Inicio (ahora "Espacio usado") y el aviso de que los proyectos solo existen en el navegador desaparecen mientras el espacio de trabajo está en una carpeta, porque ya no ocupa espacio en el navegador. El aviso del navegador incluye un enlace para guardarlos en una carpeta.
+
 ## [1.4.0] — 2026-10-02
 
 ### Added
