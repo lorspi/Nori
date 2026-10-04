@@ -70,6 +70,8 @@ function buildCurvePath(easing: EasingConfig, px: (t: number) => number, py: (v:
   const pt = (t: number, v: number) => `${px(t).toFixed(2)},${py(v).toFixed(2)}`;
 
   if (model === 'linear') return `M ${pt(0, 0)} L ${pt(1, 1)}`;
+  // Flat until the end of the segment, then a vertical jump to the target
+  if (model === 'hold') return `M ${pt(0, 0)} L ${pt(1, 0)} L ${pt(1, 1)}`;
 
   const bezier = getEasingBezier(easing);
   if (bezier) {
@@ -336,7 +338,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
   );
 
   const graphHint =
-    model === 'linear'
+    model === 'linear' || model === 'hold'
       ? null
       : model === 'spring'
         ? t('Arrastra el punto: altura = rebote, posición = velocidad')
@@ -606,6 +608,12 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({ easing, onChange, onSt
       {model === 'linear' && (
         <p className="text-[10px] text-muted-foreground leading-snug">
           {t('Velocidad constante, sin parámetros. Elige «Personalizada» para editar la curva con puntos.')}
+        </p>
+      )}
+
+      {model === 'hold' && (
+        <p className="text-[10px] text-muted-foreground leading-snug">
+          {t('Sin interpolación: el valor se mantiene y cambia de golpe al llegar al siguiente fotograma clave.')}
         </p>
       )}
     </div>

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1] — 2026-10-03
+
+### Added
+
+- **Curva "Sin suavizado"**
+  La primera opción de la curva de suavizado no interpola: el valor se queda fijo durante todo el tramo y cambia de golpe al llegar al siguiente fotograma clave, sin movimiento intermedio. Sirve para cortes, parpadeos o cambios de color instantáneos. La gráfica la muestra como un escalón y "Personalizada" parte de una curva lineal. Al exportar a Lottie se escribe como un fotograma clave de mantener (`h: 1`), y al importar un Lottie esos fotogramas clave se reconocen como "Sin suavizado".
+
 ## [1.5.0] — 2026-10-02
 
 ### Added

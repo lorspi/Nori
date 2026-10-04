@@ -49,6 +49,8 @@ export default {
 
   // Easing curves (EASING_MENU)
   Personalizada: 'Custom',
+  'Sin suavizado': 'No easing',
+  'Cambio instantáneo, sin interpolar': 'Instant change, no interpolation',
   'Velocidad constante': 'Constant speed',
   'Arranca lento y acelera': 'Starts slow and speeds up',
   'Arranca rápido y frena': 'Starts fast and slows down',

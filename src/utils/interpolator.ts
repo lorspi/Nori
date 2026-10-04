@@ -180,6 +180,9 @@ export function evaluateEasing(easing: EasingConfig, t: number): number {
   switch (easing.type) {
     case 'linear':
       return t;
+    case 'hold':
+      // No interpolation: the start value stays until the next keyframe
+      return 0;
     case 'spring':
     case 'custom-spring':
       return evaluateSpring(
@@ -298,6 +301,8 @@ export function interpolateTrackValue(
     if (currentTime >= k1.time && currentTime <= k2.time) {
       const duration = k2.time - k1.time;
       if (duration <= 0) return k1.value;
+      // No interpolation: jumps to the next value right on its keyframe
+      if (k1.easing.type === 'hold') return currentTime < k2.time ? k1.value : k2.value;
 
       const rawProgress = (currentTime - k1.time) / duration;
       const smoothProgress = evaluateEasing(k1.easing, rawProgress);

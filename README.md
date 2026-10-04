@@ -28,7 +28,7 @@ En un mundo donde las herramientas de motion design suelen ser pesadas, costosas
 - **Grupos de capas** que se animan como un todo mientras cada capa conserva su propia animación.
 - **Operaciones booleanas** (unir, restar, intersectar y excluir) entre formas que siguen siendo editables y animables, como en Figma.
 - **Línea de tiempo con fotogramas clave** por propiedad, arrastrables y con reproducción en bucle.
-- **Curvas de suavizado** spring, Bézier, ease-in-out, bounce y lineal, con vista previa en vivo.
+- **Curvas de suavizado** spring, Bézier, ease-in-out, bounce, lineal y sin suavizado, con vista previa en vivo.
 - **Importación de animaciones Lottie** y de proyectos propios, desde un botón o arrastrando el archivo.
 - **Exportación a GIF, MP4, WebM, SVG animado, Lottie (normal u optimizado) y JSON**, con resolución, FPS, antialiasing y fondo transparente configurables.
 - **Carpeta local**: el espacio de trabajo puede guardarse en una carpeta de tu equipo, con un JSON por proyecto y una carpeta por cada carpeta de Inicio (Chrome, Edge, Brave u Opera de escritorio).

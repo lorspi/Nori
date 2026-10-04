@@ -164,11 +164,16 @@ function buildProperty(
   }
 
   const dims = evaluate(0).length;
-  const points: { time: number; value: Vec; linear: boolean; ease?: ReturnType<typeof linearEase> }[] = [];
+  const points: { time: number; value: Vec; linear: boolean; hold?: boolean; ease?: ReturnType<typeof linearEase> }[] = [];
   const aligned = affine ? alignedKeyframes(animated) : null;
 
   if (aligned) {
     aligned.forEach((k, idx) => {
+      // No easing: a Lottie hold keyframe
+      if (idx < aligned.length - 1 && k.easing.type === 'hold') {
+        points.push({ time: k.time, value: evaluate(k.time), linear: false, hold: true });
+        return;
+      }
       const handles = idx < aligned.length - 1 ? easingHandles(k) : null;
       if (idx < aligned.length - 1 && !handles) {
         // Spring / bounce: one keyframe per frame along the segment
@@ -204,7 +209,10 @@ function buildProperty(
   }
   const k: LottieKeyframe[] = reduced.map((p, idx) => {
     const kf: LottieKeyframe = { t: toFrame(ctx, p.time), s: fmtVec(ctx, p.value) };
-    if (idx < reduced.length - 1) Object.assign(kf, p.ease ?? linearEase(dims));
+    if (idx < reduced.length - 1) {
+      if (p.hold) kf.h = 1;
+      else Object.assign(kf, p.ease ?? linearEase(dims));
+    }
     return kf;
   });
   return { a: 1, k };

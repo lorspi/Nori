@@ -210,8 +210,12 @@ export default {
   'Elasticidad': 'Elasticity',
   'Velocidad constante, sin parámetros. Elige «Personalizada» para editar la curva con puntos.':
     'Constant speed, no parameters. Choose "Custom" to edit the curve with points.',
+  'Sin interpolación: el valor se mantiene y cambia de golpe al llegar al siguiente fotograma clave.':
+    'No interpolation: the value holds and changes all at once on the next keyframe.',
 
   // Easing menu (EASING_MENU)
+  'Sin suavizado': 'No easing',
+  'Cambio instantáneo, sin interpolar': 'Instant change, no interpolation',
   'Linear': 'Linear',
   'Ease in': 'Ease in',
   'Ease out': 'Ease out',

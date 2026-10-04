@@ -7,6 +7,7 @@ export interface LottieKeyframe {
   e?: number[] | number; // end value
   i?: { x: number | number[]; y: number | number[] }; // bezier in
   o?: { x: number | number[]; y: number | number[] }; // bezier out
+  h?: number; // 1 = hold: no interpolation until the next keyframe
 }
 
 export interface LottieTransformProp {
@@ -210,7 +211,7 @@ export function parseLottieTrack(
       time: Number(timeInSec.toFixed(3)),
       value,
       easing: {
-        type: 'bezier',
+        type: kf.h === 1 ? 'hold' : 'bezier',
         bezier: { x1, y1, x2, y2 },
         spring: { stiffness: 270.18, damping: 13.2, mass: 1 },
       },

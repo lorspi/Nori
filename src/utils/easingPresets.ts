@@ -10,8 +10,9 @@ import {
 
 export type EasingMenuId = EasingPresetType | 'custom';
 
-// Order of the curve dropdown: linear first, spring last, then the custom curve
+// Order of the curve dropdown: no easing and linear first, spring last, then the custom curve
 export const EASING_MENU: { id: EasingMenuId; label: string; description: string }[] = [
+  { id: 'hold', label: 'Sin suavizado', description: 'Cambio instantáneo, sin interpolar' },
   { id: 'linear', label: 'Linear', description: 'Velocidad constante' },
   { id: 'ease-in', label: 'Ease in', description: 'Arranca lento y acelera' },
   { id: 'ease-out', label: 'Ease out', description: 'Arranca rápido y frena' },
@@ -24,10 +25,12 @@ export const EASING_MENU: { id: EasingMenuId; label: string; description: string
 ];
 
 // How the curve is shaped and edited
-export type EasingModel = 'linear' | 'bezier' | 'spring' | 'bounce';
+export type EasingModel = 'hold' | 'linear' | 'bezier' | 'spring' | 'bounce';
 
 export function getEasingModel(easing: EasingConfig): EasingModel {
   switch (easing.type) {
+    case 'hold':
+      return 'hold';
     case 'linear':
       return 'linear';
     case 'spring':
@@ -62,6 +65,7 @@ export function applyEasingPreset(easing: EasingConfig, type: EasingPresetType):
 // Editable copy of the current curve ("Personalizada")
 export function toCustomEasing(easing: EasingConfig): EasingConfig {
   switch (getEasingModel(easing)) {
+    case 'hold':
     case 'linear':
       // Handles on the diagonal: still linear, ready to be dragged
       return { ...easing, type: 'bezier', bezier: { x1: 0.33, y1: 0.33, x2: 0.67, y2: 0.67 } };

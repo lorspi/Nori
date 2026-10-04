@@ -3,6 +3,7 @@
 // the custom cubic Bézier (name kept so projects and Lottie imports stay compatible).
 export type EasingPresetType =
   | 'linear'
+  | 'hold'
   | 'ease-in'
   | 'ease-out'
   | 'ease-in-out'
