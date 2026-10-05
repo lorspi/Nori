@@ -15,6 +15,18 @@ export interface ExportProgress {
 
 export type ProgressCallback = (progress: ExportProgress) => void;
 
+// A render stopped with its Cancel button
+export class ExportCancelledError extends Error {
+  constructor() {
+    super('Export cancelled');
+    this.name = 'AbortError';
+  }
+}
+
+const throwIfCancelled = (signal?: AbortSignal) => {
+  if (signal?.aborted) throw new ExportCancelledError();
+};
+
 // ── Antialiasing ────────────────────────────────────────────────────────────
 
 // Supersampling factors offered for GIF and video (1 = off)
@@ -94,7 +106,8 @@ function createFrameRenderer(project: Project, settings: ExportSettings, width: 
 export async function exportToGif(
   project: Project,
   settings: ExportSettings,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<Blob> {
   const fps = Math.min(60, Math.max(10, settings.fps || 24));
   const totalFrames = Math.max(1, Math.round(project.duration * fps));
@@ -113,6 +126,7 @@ export async function exportToGif(
   const drawFrame = createFrameRenderer(project, settings, width, height);
 
   for (let frame = 0; frame < totalFrames; frame++) {
+    throwIfCancelled(signal);
     const currentTime = (frame / totalFrames) * project.duration;
 
     // Render frame
@@ -148,6 +162,7 @@ export async function exportToGif(
     });
   }
 
+  throwIfCancelled(signal);
   const blob = encoder.finish();
 
   if (onProgress) {
@@ -218,7 +233,8 @@ function renderMotionBlurFrame(
 export async function exportToVideo(
   project: Project,
   settings: ExportSettings,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<Blob> {
   const fps = Math.min(60, Math.max(15, settings.fps || 30));
   const totalFrames = Math.max(1, Math.round(project.duration * fps));
@@ -295,28 +311,38 @@ export async function exportToVideo(
   // Render initial frame
   if (!blurred) drawFrame(ctx, 0);
 
-  for (let frame = 0; frame < totalFrames; frame++) {
-    const currentTime = (frame / totalFrames) * project.duration;
+  try {
+    for (let frame = 0; frame < totalFrames; frame++) {
+      throwIfCancelled(signal);
+      const currentTime = (frame / totalFrames) * project.duration;
 
-    if (blurred) {
-      recorder.pause();
-      renderMotionBlurFrame(blurred.sampleCtx, drawFrame, project, currentTime, project.duration / totalFrames, shutter, blurred.acc, blurred.out);
-      recorder.resume();
-      ctx.putImageData(blurred.out, 0, 0);
-    } else {
-      drawFrame(ctx, currentTime);
+      if (blurred) {
+        recorder.pause();
+        renderMotionBlurFrame(blurred.sampleCtx, drawFrame, project, currentTime, project.duration / totalFrames, shutter, blurred.acc, blurred.out);
+        recorder.resume();
+        ctx.putImageData(blurred.out, 0, 0);
+      } else {
+        drawFrame(ctx, currentTime);
+      }
+
+      if (onProgress) {
+        onProgress({
+          frame: frame + 1,
+          totalFrames,
+          percentage: Math.round(((frame + 1) / totalFrames) * 90),
+          stage: t('Grabando fotograma {frame} de {total}...', { frame: frame + 1, total: totalFrames }),
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, frameIntervalMs));
     }
-
-    if (onProgress) {
-      onProgress({
-        frame: frame + 1,
-        totalFrames,
-        percentage: Math.round(((frame + 1) / totalFrames) * 90),
-        stage: t('Grabando fotograma {frame} de {total}...', { frame: frame + 1, total: totalFrames }),
-      });
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, frameIntervalMs));
+  } catch (err) {
+    // Cancelled (or failed): stop recording and drop what was recorded
+    recorder.onstop = null;
+    recorder.onerror = null;
+    if (recorder.state !== 'inactive') recorder.stop();
+    stream.getTracks().forEach((track) => track.stop());
+    throw err;
   }
 
   recorder.stop();
@@ -350,26 +376,28 @@ export async function exportToVideo(
 export async function exportProject(
   project: Project,
   settings: ExportSettings,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<{ blob: Blob; filename: string }> {
   const sanitize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '_');
   const baseName = sanitize(project.title) || 'nori_animation';
   // Boolean groups need their real geometry (stroke and shadows included) in every frame
   await prepareBooleanEngine(project);
+  throwIfCancelled(signal);
 
   switch (settings.format) {
     case 'gif': {
-      const blob = await exportToGif(project, settings, onProgress);
+      const blob = await exportToGif(project, settings, onProgress, signal);
       return { blob, filename: `${baseName}.gif` };
     }
 
     case 'webm': {
-      const blob = await exportToVideo(project, settings, onProgress);
+      const blob = await exportToVideo(project, settings, onProgress, signal);
       return { blob, filename: `${baseName}.webm` };
     }
 
     case 'mp4': {
-      const blob = await exportToVideo(project, settings, onProgress);
+      const blob = await exportToVideo(project, settings, onProgress, signal);
       return { blob, filename: `${baseName}.mp4` };
     }
 

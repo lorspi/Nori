@@ -22,6 +22,8 @@ export interface ProjectMeta {
   deletedAt?: number;
   /** Folder that holds the project; without it the project is at the root of Inicio */
   folderId?: string;
+  /** Position in the manual order of its folder (projects without one go first) */
+  order?: number;
 }
 
 export interface FolderMeta {
@@ -128,6 +130,46 @@ export function listProjects(): ProjectMeta[] {
   return readIndex()
     .filter((m) => !m.deletedAt)
     .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+// ── Order of the projects in Inicio ──────────────────────────────────────────
+
+/** How Inicio sorts the projects: most recently edited first, or as the user arranged them */
+export type ProjectSort = 'recent' | 'manual';
+const PROJECT_SORT_KEY = 'nori-project-sort';
+
+export function getProjectSort(): ProjectSort {
+  try {
+    return localStorage.getItem(PROJECT_SORT_KEY) === 'manual' ? 'manual' : 'recent';
+  } catch {
+    return 'recent';
+  }
+}
+
+export function setProjectSort(sort: ProjectSort) {
+  try {
+    localStorage.setItem(PROJECT_SORT_KEY, sort);
+  } catch {}
+}
+
+/**
+ * Projects in manual order. Those never arranged (new, duplicated or just moved to the folder)
+ * go first, most recently edited first, so they don't get lost at the end of the list.
+ */
+export function sortProjectsManually(projects: ProjectMeta[]): ProjectMeta[] {
+  return [...projects].sort((a, b) => {
+    if (a.order === undefined || b.order === undefined) {
+      if (a.order === undefined && b.order === undefined) return b.updatedAt - a.updatedAt;
+      return a.order === undefined ? -1 : 1;
+    }
+    return a.order - b.order;
+  });
+}
+
+/** Stores the manual order of the projects of a folder (or of the root), in the given order */
+export function reorderProjects(ids: string[]): boolean {
+  const position = new Map(ids.map((id, i) => [id, i]));
+  return writeIndex(readIndex().map((m) => (position.has(m.id) ? { ...m, order: position.get(m.id)! } : m)));
 }
 
 /** Projects in the trash, most recently deleted first */
@@ -293,9 +335,9 @@ export function deleteFolder(id: string): boolean {
   return writeFolders(readFolders().filter((f) => f.id !== id));
 }
 
-/** Moves a project into a folder, or to the root with null */
+/** Moves a project into a folder, or to the root with null. In manual order it goes first there */
 export function moveProjectToFolder(id: string, folderId: string | null): boolean {
-  return updateMeta(id, ({ folderId: _old, ...m }) => (folderId ? { ...m, folderId } : m));
+  return updateMeta(id, ({ folderId: _old, order: _order, ...m }) => (folderId ? { ...m, folderId } : m));
 }
 
 // ── Whole workspace (backups) ────────────────────────────────────────────────

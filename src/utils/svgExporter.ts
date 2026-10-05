@@ -3,7 +3,7 @@ import { getLayerPropertiesAtTime } from './interpolator';
 import { getShapePathData } from './pathGeometry';
 import { BoundingBox, getLayerLocalBounds, getPathBounds } from './renderer';
 import { BooleanResult, canBeBooleanOperand, operandsBounds, resolveBooleanGroup } from './booleanOps';
-import { getChildren, getParent } from './layerTree';
+import { getChildren, getDescendantIds, getParent } from './layerTree';
 
 export interface SvgExportOptions {
   transparent?: boolean;
@@ -32,6 +32,40 @@ const hasVisibleStroke = (p: LayerProperties) => !!p.stroke && p.stroke !== 'tra
 const sampleTimes = (ctx: ExportContext, count = ctx.samples) =>
   Array.from({ length: count + 1 }, (_, s) => (s / count) * ctx.durationSec);
 
+// Instants where a layer's values change at once: keyframes reached without easing ("hold") and
+// the start and end of its time range (shown up to outTime included, so it hides right after)
+function jumpTimes(layer: Layer, eps: number): number[] {
+  const times = [layer.inTime, layer.outTime + eps];
+  for (const track of layer.tracks) {
+    track.keyframes.forEach((k, i) => {
+      if (i > 0 && track.keyframes[i - 1].easing.type === 'hold') times.push(k.time);
+    });
+  }
+  return times;
+}
+
+/**
+ * Regular samples plus a pair right before and at each jump of the given layers. Animations are linear
+ * between samples, so without them a jump would become a fade over a whole sample interval (two
+ * frames of a hand-drawn cycle crossfading instead of switching).
+ */
+function exportTimes(ctx: ExportContext, layers: Layer[]): number[] {
+  const eps = ctx.durationSec * 1e-5;
+  const times = sampleTimes(ctx);
+  for (const layer of layers) for (const t of jumpTimes(layer, eps)) times.push(t - eps, t);
+  // One time per keyframe selector: the latest, so a sample a hair before a jump doesn't hide it
+  const byPercent = new Map<string, number>();
+  for (const t of times.filter((t) => t >= 0 && t <= ctx.durationSec).sort((a, b) => a - b)) {
+    byPercent.set(percentOf(ctx, t), t);
+  }
+  return [...byPercent.values()];
+}
+
+// Keyframe selector of a time, precise enough to tell apart the two sides of a jump
+function percentOf(ctx: ExportContext, t: number) {
+  return `${Number(((t / ctx.durationSec) * 100).toFixed(3))}%`;
+}
+
 // Transform of a layer as drawn on the canvas: position + anchor + R·S·(local − anchor)
 function transformCss(p: LayerProperties) {
   const ax = p.anchorX || 0;
@@ -56,23 +90,23 @@ function addLayerAnimation(ctx: ExportContext, layer: Layer, animName: string, p
   let keyframeCss = `@keyframes ${animName} {\n`;
   let morphCss = morphs ? `@keyframes ${animName}_d {\n` : '';
 
-  for (const t of sampleTimes(ctx)) {
-    const percentage = ((t / ctx.durationSec) * 100).toFixed(1);
+  for (const t of exportTimes(ctx, [layer])) {
+    const percentage = percentOf(ctx, t);
 
     // Check inTime and outTime
     if (t < layer.inTime || t > layer.outTime) {
-      keyframeCss += `  ${percentage}% { opacity: 0; transform: none; }\n`;
+      keyframeCss += `  ${percentage} { opacity: 0; transform: none; }\n`;
       continue;
     }
 
     const p = getLayerPropertiesAtTime(layer, t);
     const op = paint ? (p.opacity !== undefined ? p.opacity : 1) : 1;
     const blurCss = hasBlur ? `\n    filter: blur(${Math.max(0, Number(p.blur) || 0).toFixed(2)}px);` : '';
-    keyframeCss += `  ${percentage}% {
+    keyframeCss += `  ${percentage} {
     opacity: ${op.toFixed(3)};
     transform: ${transformCss(p)};${blurCss}
   }\n`;
-    if (morphs && p.pathData) morphCss += `  ${percentage}% { d: path("${p.pathData}"); }\n`;
+    if (morphs && p.pathData) morphCss += `  ${percentage} { d: path("${p.pathData}"); }\n`;
   }
 
   keyframeCss += `}\n`;
@@ -245,7 +279,8 @@ const EMPTY_PATH = 'M0 0';
 function exportBooleanGroup(ctx: ExportContext, group: Layer, uid: string): string {
   const layers = ctx.project.layers;
   const p0 = getLayerPropertiesAtTime(group, 0);
-  const times = sampleTimes(ctx);
+  const inside = getDescendantIds(layers, group.id);
+  const times = exportTimes(ctx, [group, ...layers.filter((l) => inside.includes(l.id))]);
   const results = times.map((t) => resolveBooleanGroup(layers, group, t));
   const outlines = results.map((r) => r.d);
   const ready = outlines.every((d) => d !== null);
@@ -259,7 +294,7 @@ function exportBooleanGroup(ctx: ExportContext, group: Layer, uid: string): stri
   }
 
   const wanted = ctx.booleanMode === 'auto' ? (hasVisibleStroke(p0) ? 'flatten' : 'masks') : ctx.booleanMode;
-  if (wanted === 'flatten' && outlines.some((d) => d !== null)) return exportFlattenedGroup(ctx, group, p0, uid, outlines);
+  if (wanted === 'flatten' && outlines.some((d) => d !== null)) return exportFlattenedGroup(ctx, group, p0, uid, outlines, times);
   return exportMaskedGroup(ctx, group, p0, uid, results);
 }
 
@@ -277,11 +312,12 @@ function exportFlattenedGroup(
   group: Layer,
   p0: LayerProperties,
   uid: string,
-  sampled: (string | null)[]
+  sampled: (string | null)[],
+  times: number[]
 ): string {
   const layers = ctx.project.layers;
   let values = fillGaps(sampled);
-  let keyTimes = values.map((_, i) => i / (values.length - 1));
+  let keyTimes = times.map((t) => t / ctx.durationSec);
   // Outlines with the same commands morph smoothly; otherwise they change frame by frame
   const smooth = values.every((d) => d && pathStructure(d) === pathStructure(values[0]));
   if (!smooth) {
@@ -299,7 +335,7 @@ function exportFlattenedGroup(
   const shown = values.map((d) => d || EMPTY_PATH);
   const animate = `<animate attributeName="d" dur="${ctx.durationSec}s" repeatCount="indefinite" calcMode="${
     smooth ? 'linear' : 'discrete'
-  }" keyTimes="${keyTimes.map((k) => Number(k.toFixed(5))).join(';')}" values="${shown.join(';')}" />`;
+  }" keyTimes="${keyTimes.map((k) => Number(k.toFixed(6))).join(';')}" values="${shown.join(';')}" />`;
   const bounds = unionBounds(values.filter((d) => d).map((d) => getPathBounds(d))) ?? getLayerLocalBounds(group, p0);
   const content = paintContent(ctx, group, p0, uid, (attrs) => `<path d="${shown[0]}" ${attrs}>${animate}</path>`, bounds);
   return wrapShadows(ctx, group, p0, uid, content, bounds, 0);

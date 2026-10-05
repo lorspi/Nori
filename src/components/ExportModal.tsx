@@ -167,10 +167,39 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
   // Only one render runs at a time; it keeps going while another format is shown
   const [exporting, setExporting] = useState<{ format: RasterFormat; progress: ExportProgress | null } | null>(null);
 
+  // Stops the render in progress (Cancel button, or the modal going away)
+  const abortRef = useRef<AbortController | null>(null);
+
   // Free every render's object URL when the editor goes away
   const rendersRef = useRef(renders);
   rendersRef.current = renders;
-  useEffect(() => () => Object.values(rendersRef.current).forEach((r) => r && URL.revokeObjectURL(r.url)), []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      Object.values(rendersRef.current).forEach((r) => r && URL.revokeObjectURL(r.url));
+    },
+    []
+  );
+
+  // Escape closes the modal, unless it is closing one of its menus or leaving a field
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
+      if (dialogRef.current?.querySelector('[role="listbox"]')) return;
+      e.preventDefault();
+      onCloseRef.current();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+  // A click outside closes it only when it also started outside (not a drag that ends there)
+  const pressedOutsideRef = useRef(false);
 
   // Boolean groups: their geometry comes from paper.js, loaded before the SVG is generated
   const [booleanMode, setBooleanMode] = useState<SvgBooleanMode>('auto');
@@ -228,13 +257,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
   const handleStartExport = async () => {
     if (!raster || exporting) return;
     const target = raster;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setExporting({ format: target, progress: null });
     setErrors((prev) => ({ ...prev, [target]: undefined }));
 
     const settings: ExportSettings = { format: target, fps, scale, transparent, backgroundColor, loop, motionBlur, antialias };
     try {
-      const { blob, filename } = await exportProject(project, settings, (progress) =>
-        setExporting({ format: target, progress })
+      const { blob, filename } = await exportProject(
+        project,
+        settings,
+        (progress) => {
+          if (!controller.signal.aborted) setExporting({ format: target, progress });
+        },
+        controller.signal
       );
       const result: RenderResult = {
         url: URL.createObjectURL(blob),
@@ -252,12 +288,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
         return { ...prev, [target]: result };
       });
     } catch (err: any) {
+      // Cancelled: back to the empty preview, without an error
+      if (controller.signal.aborted) return;
       console.error('Export error:', err);
       setErrors((prev) => ({ ...prev, [target]: err?.message || t('Error durante la exportación del archivo.') }));
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setExporting(null);
     }
   };
+
+  const handleCancelExport = () => abortRef.current?.abort();
 
   const handleDeleteRender = () => {
     if (!raster || !render) return;
@@ -448,6 +489,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                 style={{ width: `${exporting?.progress?.percentage || 0}%` }}
               />
             </div>
+            <div className="flex justify-center pt-1">
+              <button
+                type="button"
+                onClick={handleCancelExport}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-border bg-card text-muted-foreground hover:text-destructive hover:border-destructive/40 hover:bg-destructive/10 transition-colors cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+                <span>{t('Cancelar renderizado')}</span>
+              </button>
+            </div>
           </div>
         ) : error ? (
           <div className="max-w-xs bg-destructive/10 border border-destructive/30 rounded-xl p-3 flex items-start gap-2 text-destructive">
@@ -466,9 +517,24 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 backdrop-blur-[2px] p-4 select-none animate-fade-in">
-      {/* Never taller than the window (minus its margins): the settings and preview scroll instead */}
-      <div className="bg-card border border-border rounded-2xl shadow-card-hover w-full max-w-4xl max-h-full flex flex-col text-foreground animate-scale-in">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 backdrop-blur-[2px] p-4 select-none animate-fade-in"
+      onMouseDown={(e) => {
+        pressedOutsideRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (pressedOutsideRef.current && e.target === e.currentTarget) onClose();
+        pressedOutsideRef.current = false;
+      }}
+    >
+      {/* Never taller than the window (minus its margins): the settings column scrolls instead */}
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('Exportar Animación')}
+        className="bg-card border border-border rounded-2xl shadow-card-hover w-full max-w-4xl max-h-full flex flex-col text-foreground animate-scale-in"
+      >
         {/* Header */}
         <div className="px-5 py-4 border-b border-border flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
@@ -484,9 +550,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
           </button>
         </div>
 
-        {/* Content: settings on the left, preview on the right */}
-        <div className="p-5 grid grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)] gap-5 text-xs flex-1 min-h-0 overflow-y-auto">
-          <div className="space-y-4">
+        {/* Content: settings on the left, preview on the right. On wide screens the preview stays
+            in place and only the settings scroll when they don't fit; stacked, everything scrolls */}
+        <div className="p-5 grid grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] gap-5 text-xs flex-1 min-h-0 overflow-y-auto md:overflow-hidden">
+          <div className="space-y-4 md:min-h-0 md:overflow-y-auto md:-mr-3 md:pr-3">
             {/* Format cards, two per row */}
             <div>
               <label className="text-muted-foreground font-medium block mb-2">{t('Formato de exportación')}</label>
@@ -695,7 +762,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
           </div>
 
           {/* Preview / render */}
-          <div className="flex flex-col gap-2 min-h-72 min-w-0">{renderPreview()}</div>
+          <div className="flex flex-col gap-2 min-h-72 min-w-0 md:min-h-0">{renderPreview()}</div>
         </div>
 
         {/* Footer Actions */}
@@ -725,23 +792,23 @@ export const ExportModal: React.FC<ExportModalProps> = ({ project, isOpen, onClo
                   {t('Descargar {filename}', { filename: isSvg ? `${baseName}.svg` : isLottie ? lottieFilename : render!.filename })}
                 </span>
               </button>
+            ) : exporting ? (
+              // One render at a time: while it runs (in this format or another) the button stops it
+              <button
+                onClick={handleCancelExport}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-secondary hover:bg-destructive/10 border border-border hover:border-destructive/40 text-foreground hover:text-destructive transition-colors cursor-pointer"
+                data-tooltip={t('Renderizando {format}...', { format: renderingLabel ?? '' })}
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>{t('Cancelar render {format}', { format: renderingLabel ?? '' })}</span>
+              </button>
             ) : (
               <button
                 onClick={handleStartExport}
-                disabled={!!exporting}
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-bento-blue hover:bg-bento-blue/90 active:bg-bento-blue/80 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-bento-blue hover:bg-bento-blue/90 active:bg-bento-blue/80 text-white transition-colors cursor-pointer"
               >
-                {exporting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>{t('Renderizando {format}...', { format: renderingLabel ?? '' })}</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>{t('Renderizar')}</span>
-                  </>
-                )}
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{t('Renderizar')}</span>
               </button>
             )}
           </div>

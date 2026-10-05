@@ -298,7 +298,7 @@ export default function Editor({ initialProject, autoplay = false, onGoHome, fol
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Editor shortcuts are paused while a Nori dialog is open
-      if (presetTargetIds) return;
+      if (presetTargetIds || isExportOpen) return;
 
       // Undo / Redo shortcuts
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {

@@ -29,6 +29,8 @@ import {
   LockKey,
   CircleNotch,
   WarningCircle,
+  ClockCounterClockwise,
+  HandGrabbing,
 } from '@phosphor-icons/react';
 import { Project } from '../types/animation';
 import { useUI } from '../lib/ui';
@@ -53,6 +55,11 @@ import {
   moveProjectToFolder,
   getLastView,
   setLastView,
+  ProjectSort,
+  getProjectSort,
+  setProjectSort,
+  sortProjectsManually,
+  reorderProjects,
 } from '../utils/projectStorage';
 import {
   ImportedProject,
@@ -73,6 +80,7 @@ import { ExportModal } from './ExportModal';
 import { PasteSvgModal } from './PasteSvgModal';
 import { FigmaImportModal } from './FigmaImportModal';
 import { MenuButton, MenuButtonItem } from './MenuButton';
+import { Dropdown } from './Dropdown';
 import { StorageSection, useFolderLinking } from './StorageSection';
 import { StorageBadge, useGrantFolderAccess } from './StorageBadge';
 import {
@@ -85,9 +93,27 @@ import {
 
 type Section = 'projects' | 'trash' | 'storage' | 'about';
 
-// Drop target while a project card is dragged: a folder id, or the root of Inicio
-type DropTarget = string | typeof ROOT_TARGET;
+// Drop target while a project card is dragged: a folder id, the root of Inicio or the trash
+type DropTarget = string | typeof ROOT_TARGET | typeof TRASH_TARGET;
 const ROOT_TARGET = '__root__';
+const TRASH_TARGET = '__trash__';
+// Where a dragged card would land among the others (manual order)
+type ReorderTarget = { id: string; side: 'before' | 'after' };
+
+const SORT_OPTIONS: { value: ProjectSort; label: string; description: string; Icon: React.ElementType }[] = [
+  {
+    value: 'recent',
+    label: 'Última edición',
+    description: 'Los proyectos editados más recientemente primero',
+    Icon: ClockCounterClockwise,
+  },
+  {
+    value: 'manual',
+    label: 'Orden manual',
+    description: 'Arrastra los proyectos para ordenarlos a tu gusto',
+    Icon: HandGrabbing,
+  },
+];
 // dataTransfer type that marks the drag of a project card (not a file from the system)
 const PROJECT_DRAG_TYPE = 'application/x-nori-project';
 
@@ -154,6 +180,7 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
   const [trashed, setTrashed] = useState<ProjectMeta[]>(listTrashedProjects);
   const [folders, setFolders] = useState<FolderMeta[]>(listFolders);
   const [usage, setUsage] = useState<number>(getStorageUsage);
+  const [sort, setSort] = useState<ProjectSort>(getProjectSort);
   const [warningDismissed, setWarningDismissed] = useState<boolean>(readWarningDismissed);
 
   const dismissWarning = () => {
@@ -168,6 +195,8 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     setTrashed(listTrashedProjects());
     setFolders(listFolders());
     setUsage(getStorageUsage());
+    // A linked folder can bring its own preference
+    setSort(getProjectSort());
   }, []);
 
   // Linked folder: read again (permission granted, changes from another tab), linked or unlinked
@@ -193,10 +222,15 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     (meta: ProjectMeta) => (meta.folderId && folderIds.has(meta.folderId) ? meta.folderId : null),
     [folderIds]
   );
-  const visibleProjects = useMemo(
-    () => projects.filter((m) => folderOf(m) === (currentFolder?.id ?? null)),
-    [projects, currentFolder, folderOf]
-  );
+  const visibleProjects = useMemo(() => {
+    const inFolder = projects.filter((m) => folderOf(m) === (currentFolder?.id ?? null));
+    return sort === 'manual' ? sortProjectsManually(inFolder) : inFolder;
+  }, [projects, currentFolder, folderOf, sort]);
+
+  const changeSort = (next: ProjectSort) => {
+    setSort(next);
+    setProjectSort(next);
+  };
   const folderCounts = useMemo(() => {
     const counts = new Map<string, number>();
     projects.forEach((m) => {
@@ -386,9 +420,10 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     { label: t('Eliminar carpeta'), danger: true, onSelect: () => handleDeleteFolder(folder) },
   ];
 
-  // ── Dragging projects into folders ──────────────────────────────────────────
+  // ── Dragging projects into folders, to the trash or among the others ────────
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const [reorderTarget, setReorderTarget] = useState<ReorderTarget | null>(null);
 
   const moveProject = (id: string, target: DropTarget) => {
     const meta = projects.find((m) => m.id === id);
@@ -407,6 +442,29 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
         : t('"{title}" se movió a la raíz de Inicio', { title: meta.title }),
       'success'
     );
+  };
+
+  /**
+   * Puts the dragged project before or after another one. Arranging projects switches Inicio
+   * to the manual order, starting from the order on screen.
+   */
+  const reorderProject = (id: string, { id: targetId, side }: ReorderTarget) => {
+    const current = visibleProjects.map((m) => m.id);
+    const ids = current.filter((other) => other !== id);
+    let at = ids.indexOf(targetId);
+    if (at < 0 || !current.includes(id)) return;
+    if (side === 'after') at++;
+    ids.splice(at, 0, id);
+    if (ids.every((other, i) => other === current[i])) return;
+    if (!reorderProjects(ids)) {
+      toast(t('No se pudo guardar el orden de los proyectos'), 'error');
+      return;
+    }
+    if (sort !== 'manual') {
+      changeSort('manual');
+      toast(t('Orden manual activado: los proyectos se quedan donde los dejes'), 'success');
+    }
+    refresh();
   };
 
   /** Props that turn an element into a place where a project card can be dropped */
@@ -428,7 +486,12 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
       e.stopPropagation();
       setDropTarget(null);
       setDraggedId(null);
-      moveProject(id, target);
+      if (target === TRASH_TARGET) {
+        const meta = projects.find((m) => m.id === id);
+        if (meta) handleTrash(meta);
+      } else {
+        moveProject(id, target);
+      }
     },
   });
 
@@ -443,15 +506,52 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     onDragEnd: () => {
       setDraggedId(null);
       setDropTarget(null);
+      setReorderTarget(null);
+    },
+    // Another card dragged over this one: it would land on the side of the cursor (the grid
+    // takes the drop, so it also works in the gap between cards)
+    onDragOver: (e: React.DragEvent) => {
+      if (!draggedId || !e.dataTransfer.types.includes(PROJECT_DRAG_TYPE)) return;
+      if (draggedId === meta.id) {
+        if (reorderTarget) setReorderTarget(null);
+        return;
+      }
+      const rect = e.currentTarget.getBoundingClientRect();
+      const side = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+      if (reorderTarget?.id !== meta.id || reorderTarget.side !== side) setReorderTarget({ id: meta.id, side });
     },
   });
+
+  /** Props of the grid of projects, where a dragged card is dropped among the others */
+  const reorderZone = {
+    onDragOver: (e: React.DragEvent) => {
+      if (!draggedId || !e.dataTransfer.types.includes(PROJECT_DRAG_TYPE)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+      setReorderTarget(null);
+    },
+    onDrop: (e: React.DragEvent) => {
+      const id = e.dataTransfer.getData(PROJECT_DRAG_TYPE);
+      if (!id) return;
+      e.preventDefault();
+      const target = reorderTarget;
+      setReorderTarget(null);
+      setDraggedId(null);
+      if (target && target.id !== id) reorderProject(id, target);
+    },
+  };
 
   // Highlight of a drop zone while a project is dragged over it
   const dropClass = (target: DropTarget) =>
     draggedId && dropTarget === target
       ? target === ROOT_TARGET
         ? 'bg-bento-orange/10 ring-1 ring-bento-orange/40'
-        : 'bg-bento-yellow/10 ring-1 ring-bento-yellow/50'
+        : target === TRASH_TARGET
+          ? 'bg-destructive/10 text-destructive ring-1 ring-destructive/40'
+          : 'bg-bento-yellow/10 ring-1 ring-bento-yellow/50'
       : '';
 
   // ── Project actions ─────────────────────────────────────────────────────────
@@ -558,17 +658,19 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
     // "Proyectos" is the root of Inicio: it stays highlighted only when no folder is open
     const active = section === id && (!isProjects || !currentFolder);
     const isTrash = id === 'trash';
+    // "Proyectos" takes projects out of their folder; "Papelera" deletes them
+    const target = isProjects ? ROOT_TARGET : isTrash ? TRASH_TARGET : null;
     return (
       <button
         onClick={() => (isProjects ? openFolder(null) : setSection(id))}
-        {...(isProjects ? dropZone(ROOT_TARGET) : {})}
+        {...(target ? dropZone(target) : {})}
         className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
           active
             ? isTrash
               ? 'bg-destructive/10 text-destructive border-l-2 border-destructive font-bold'
               : 'bg-bento-blue-light text-bento-blue border-l-2 border-bento-blue font-bold'
             : 'hover:bg-accent text-muted-foreground hover:text-foreground'
-        } ${isProjects ? dropClass(ROOT_TARGET) : ''}`}
+        } ${target ? dropClass(target) : ''}`}
       >
         <Icon className="w-3.5 h-3.5 shrink-0" />
         <span className="text-xs font-semibold flex-1">{label}</span>
@@ -796,7 +898,7 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                   <div className="min-w-0">
                     <h1 className="text-2xl font-black text-foreground font-heading">{t('Inicio')}</h1>
                     <p className="text-muted-foreground text-xs mt-1.5 leading-normal max-w-xl">
-                      {t('Tus animaciones se guardan solas mientras las editas. Pasa el cursor sobre un proyecto para ver su animación y haz clic para abrirlo; arrástralo sobre una carpeta para guardarlo en ella.')}
+                      {t('Tus animaciones se guardan solas mientras las editas. Pasa el cursor sobre un proyecto para ver su animación y haz clic para abrirlo; arrástralo sobre una carpeta para guardarlo en ella, sobre la Papelera para borrarlo o entre otros proyectos para ordenarlo.')}
                     </p>
                   </div>
                 )}
@@ -875,12 +977,31 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                 </section>
               )}
 
-              {/* Saved projects, most recently edited first */}
+              {/* Saved projects, most recently edited first or in the user's order */}
               <section className="space-y-3 pb-4">
-                <h2 className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
-                  {currentFolder ? t('Proyectos en esta carpeta') : t('Mis proyectos')}{' '}
-                  <span className="font-mono">({visibleProjects.length})</span>
-                </h2>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                    {currentFolder ? t('Proyectos en esta carpeta') : t('Mis proyectos')}{' '}
+                    <span className="font-mono">({visibleProjects.length})</span>
+                  </h2>
+                  {visibleProjects.length > 1 && (
+                    <Dropdown
+                      value={sort}
+                      options={SORT_OPTIONS.map(({ Icon, ...o }) => ({
+                        ...o,
+                        label: t(o.label),
+                        description: t(o.description),
+                        icon: <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />,
+                      }))}
+                      onChange={changeSort}
+                      size="sm"
+                      menuClassName="w-44"
+                      optionClassName=""
+                      title={t('Orden de los proyectos')}
+                      ariaLabel={t('Orden de los proyectos')}
+                    />
+                  )}
+                </div>
                 {visibleProjects.length === 0 ? (
                   <div className="text-center py-16 border border-dashed border-border rounded-2xl">
                     {currentFolder ? (
@@ -902,13 +1023,14 @@ export default function Home({ onOpenProject, onCreateProject }: HomeProps) {
                     )}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  <div {...reorderZone} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {visibleProjects.map((meta) => (
                       <ProjectCard
                         key={meta.id}
                         meta={meta}
                         dragProps={projectDrag(meta)}
                         dragging={draggedId === meta.id}
+                        dropSide={draggedId && reorderTarget?.id === meta.id ? reorderTarget.side : null}
                         onOpen={() => onOpenProject(meta.id)}
                         onOpenMenu={(x, y) => setMenu({ x, y, meta })}
                       />
@@ -1050,14 +1172,16 @@ function FolderAccessGate({ onGrant, onOpenStorage }: { onGrant: () => void; onO
 
 interface ProjectCardProps {
   meta: ProjectMeta;
-  /** Native drag props, to drop the card on a folder */
+  /** Native drag props, to drop the card on a folder, the trash or among the other cards */
   dragProps: React.HTMLAttributes<HTMLDivElement> & { draggable: boolean };
   dragging: boolean;
+  /** Side where the dragged card would land, next to this one */
+  dropSide: 'before' | 'after' | null;
   onOpen: () => void;
   onOpenMenu: (x: number, y: number) => void;
 }
 
-function ProjectCard({ meta, dragProps, dragging, onOpen, onOpenMenu }: ProjectCardProps) {
+function ProjectCard({ meta, dragProps, dragging, dropSide, onOpen, onOpenMenu }: ProjectCardProps) {
   const [hovered, setHovered] = useState(false);
   const project = useMemo(() => loadProject(meta.id), [meta.id, meta.updatedAt]);
 
@@ -1076,11 +1200,19 @@ function ProjectCard({ meta, dragProps, dragging, onOpen, onOpenMenu }: ProjectC
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`group border border-border bg-card hover:border-bento-blue/50 hover:shadow-card-hover rounded-2xl overflow-hidden transition-all duration-300 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+      className={`relative group border border-border bg-card hover:border-bento-blue/50 hover:shadow-card-hover rounded-2xl transition-all duration-300 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
         dragging ? 'opacity-50' : ''
       }`}
     >
-      <ProjectThumbnail project={project} playing={hovered} className="aspect-video border-b border-border" />
+      {/* Where the dragged card would land: a bar in the gap on that side */}
+      {dropSide && (
+        <span
+          className={`absolute -top-1 -bottom-1 w-1 rounded-full bg-bento-blue pointer-events-none ${
+            dropSide === 'before' ? '-left-2.5' : '-right-2.5'
+          }`}
+        />
+      )}
+      <ProjectThumbnail project={project} playing={hovered} className="aspect-video border-b border-border rounded-t-2xl overflow-hidden" />
       <div className="p-3 flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-foreground text-sm truncate font-heading">{meta.title}</h3>

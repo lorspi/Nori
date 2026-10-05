@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.5.2] — 2026-10-04
+
+### Added
+
+- **Ordenar los proyectos a mano**
+  Junto a "Mis proyectos" (y "Proyectos en esta carpeta") un nuevo menú elige el orden de Inicio: "Última edición", el de siempre, con los proyectos editados más recientemente primero, u "Orden manual". En orden manual, un proyecto se arrastra entre otros dos y se queda donde se suelta; una barra azul marca dónde caerá. Si se arrastra un proyecto entre otros con "Última edición" activo, Inicio pasa a orden manual partiendo del orden que se veía y lo avisa. Cada carpeta tiene su propio orden; los proyectos nuevos, duplicados o recién movidos a una carpeta aparecen primero. La elección se recuerda en el navegador y, con una carpeta local vinculada, también en ella, junto al idioma y el tema; el orden de los proyectos se guarda en la carpeta y en los respaldos.
+
+- **Arrastrar a la Papelera**
+  Un proyecto arrastrado sobre "Papelera", en la barra lateral de Inicio, se envía a la papelera al soltarlo, igual que con "Borrar" en su menú. La Papelera se resalta en rojo mientras el proyecto está encima.
+
+- **Cancelar un render**
+  Mientras se renderiza un GIF, MP4 o WebM, la barra de progreso tiene un botón "Cancelar renderizado" y el botón de abajo pasa a ser "Cancelar render", que detiene el render en curso aunque se esté viendo otro formato. Lo renderizado hasta ese momento se descarta y la vista previa vuelve a quedar lista para renderizar de nuevo.
+
+### Changed
+
+- **Cerrar la ventana de exportar con Esc o un clic fuera**
+  La ventana de exportar se cierra con Esc o con un clic fuera de ella, además de con "Cerrar" o la X. Esc primero cierra un menú abierto dentro de la ventana o sale del campo en el que se escribe, y un clic que empieza dentro y se suelta fuera (por ejemplo al seleccionar texto) no la cierra. Mientras está abierta, los atajos del editor que hay detrás quedan en pausa, así que Esc ya no cambia también la selección del lienzo. Si se cierra durante un render en el editor, el render sigue y se encuentra al volver a abrirla; en Inicio, cerrarla lo cancela.
+
+- **La vista previa de exportar queda fija**
+  Cuando las opciones de exportación no caben en la altura de la ventana, solo se desplaza la columna de formatos y opciones; la vista previa se queda en su sitio y a la vista. En pantallas estrechas, donde las columnas se apilan, se desplaza todo como antes.
+
+### Fixed
+
+- **Opacidad de los fotogramas "Sin suavizado" en el SVG exportado**
+  En el editor un cambio sin suavizado es instantáneo, pero el SVG animado lo convertía en un fundido que duraba un intervalo de muestreo (1/30 s en una animación de 1 s): en una animación hecha con varios dibujos que se turnan cambiando su opacidad, por ejemplo un trazo que "hierve", dos dibujos se veían semitransparentes y superpuestos en cada cambio, y el resultado parpadeaba. Ahora el SVG escribe dos fotogramas clave CSS pegados en cada cambio sin suavizado, el valor anterior justo antes y el nuevo en el instante exacto, así que cambia de golpe y en el mismo momento que en el editor, también en el movimiento, la escala, el desenfoque y la forma de los trazados. Lo mismo se aplica al inicio y al final del tiempo de cada capa, que antes también aparecían y desaparecían con un fundido, y a los grupos booleanos cuyas formas cambian sin suavizado.
+
 ## [1.5.1] — 2026-10-03
 
 ### Added

@@ -49,7 +49,7 @@ const RESERVED_NAMES = [MANIFEST_FILE, TRASH_DIR, BACKUPS_DIR, FOREIGN_DIR];
 // Files the operating system adds by itself; they don't count as content of the folder
 const SYSTEM_FILES = /^(\.ds_store|thumbs\.db|desktop\.ini|\.localized|\._.*)$/i;
 // Preferences of this browser saved in the manifest
-const SETTINGS_KEYS: Record<string, string> = { language: 'nori-language', theme: 'nori-theme' };
+const SETTINGS_KEYS: Record<string, string> = { language: 'nori-language', theme: 'nori-theme', projectSort: 'nori-project-sort' };
 // Time between the last change and its write to the folder
 const WRITE_DELAY = 300;
 
@@ -354,6 +354,11 @@ function applySettings(settings: Record<string, string>) {
       localStorage.setItem(SETTINGS_KEYS.theme, settings.theme);
     } catch {}
     window.dispatchEvent(new Event('nori-theme-change'));
+  }
+  if (settings.projectSort === 'recent' || settings.projectSort === 'manual') {
+    try {
+      localStorage.setItem(SETTINGS_KEYS.projectSort, settings.projectSort);
+    } catch {}
   }
 }
 

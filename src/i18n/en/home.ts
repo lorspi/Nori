@@ -79,8 +79,15 @@ export default {
   'Inicio': 'Home',
   'Los proyectos que crees o importes aquí se guardan en esta carpeta. Arrastra un proyecto a "Inicio" o a otra carpeta para moverlo.':
     'Projects you create or import here are saved in this folder. Drag a project to "Home" or to another folder to move it.',
-  'Tus animaciones se guardan solas mientras las editas. Pasa el cursor sobre un proyecto para ver su animación y haz clic para abrirlo; arrástralo sobre una carpeta para guardarlo en ella.':
-    'Your animations save automatically as you edit them. Hover over a project to see its animation and click to open it; drag it onto a folder to put it there.',
+  'Tus animaciones se guardan solas mientras las editas. Pasa el cursor sobre un proyecto para ver su animación y haz clic para abrirlo; arrástralo sobre una carpeta para guardarlo en ella, sobre la Papelera para borrarlo o entre otros proyectos para ordenarlo.':
+    'Your animations save automatically as you edit them. Hover over a project to see its animation and click to open it; drag it onto a folder to put it there, onto the Trash to delete it or between other projects to arrange it.',
+  'Última edición': 'Last edited',
+  'Orden manual': 'Manual order',
+  'Los proyectos editados más recientemente primero': 'Most recently edited projects first',
+  'Arrastra los proyectos para ordenarlos a tu gusto': 'Drag the projects to arrange them as you like',
+  'Orden de los proyectos': 'Project order',
+  'No se pudo guardar el orden de los proyectos': 'Could not save the order of the projects',
+  'Orden manual activado: los proyectos se quedan donde los dejes': 'Manual order on: projects stay where you leave them',
   'Cerrar aviso (seguirá disponible en el icono de información de Espacio usado)': 'Close notice (it stays available in the Space used info icon)',
   'Cerrar aviso': 'Close notice',
   'Proyecto en blanco, proyecto de ejemplo o carpeta': 'Blank project, sample project or folder',
@@ -446,4 +453,6 @@ export default {
   'Descargar {filename}': 'Download {filename}',
   'Renderizando {format}...': 'Rendering {format}...',
   'Renderizar': 'Render',
+  'Cancelar renderizado': 'Cancel render',
+  'Cancelar render {format}': 'Cancel {format} render',
 } satisfies Record<string, string>;
